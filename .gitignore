@@ -35,15 +35,7 @@ tb_logs/
 # ============================================================================
 
 # Large data files and datasets
-data/
-dataset/
-datasets/
-*.csv
-*.tsv
-*.npy
-*.npz
-*.mat
-*.json
+
 
 # Hyperspectral imaging data
 *.h5

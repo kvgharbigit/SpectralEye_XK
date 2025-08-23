@@ -1,0 +1,23 @@
+use_transform: true
+transform:
+    - hflip:
+        _target_: eitorch.transform.paired_transform.HorizontalFlipTransform
+        probability: 0.5
+    - vshift:
+        _target_: eitorch.transform.paired_transform.VerticalShiftTransform
+        shift_jitter: 150
+    - hshift:
+        _target_: eitorch.transform.paired_transform.HorizontalShiftTransform
+        shift_jitter: 150
+    - gauss:
+        _target_: eitorch.transform.paired_transform.GaussianTransform
+        gauss_jitter: 0.8
+    - rotate:
+        _target_: eitorch.transform.paired_transform.RotateTransform
+        rotate_jitter: 30
+#    - noise:
+#        _target_: eitorch.transform.paired_transform.NoiseTransform
+#        intensity_jitter: 0.1
+    - scale:
+        _target_: eitorch.transform.paired_transform.ScaleTransform
+        scale_jitter: 0.5

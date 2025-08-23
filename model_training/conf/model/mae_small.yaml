@@ -1,0 +1,19 @@
+name: mae_small
+model:
+  _target_: src.model_training.models.spectral_gpt.spectral_gpt.MaskedAutoencoderViT
+  img_size: 500
+  num_channels: 1
+  num_wavelengths: 30
+  spatial_patch_size: 25
+  wavelength_patch_size: 5
+
+  encoder_embed_dim: 256
+  encoder_depth: 8
+  encoder_num_heads: 8
+
+  decoder_embed_dim: 128
+  decoder_depth: 4
+  decoder_num_heads: 4
+
+  mlp_ratio: 2
+  mask_ratio: 0.8

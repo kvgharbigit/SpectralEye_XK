@@ -1,0 +1,9 @@
+_target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+mode: 'min'  # 'min' for minimizing the metric (e.g., validation loss), 'max' for maximizing (e.g., accuracy)
+factor: 0.1  # Factor by which the learning rate will be reduced (new_lr = lr * factor)
+patience: 5  # Number of epochs with no improvement after which learning rate will be reduced
+threshold: 0.001  # Minimum change in the monitored metric to qualify as an improvement
+threshold_mode: 'rel'  # Mode for threshold ('rel' for relative, 'abs' for absolute)
+cooldown: 0  # Number of epochs to wait before resuming normal operation after lr has been reduced
+min_lr: 0  # Lower bound on the learning rate
+eps: 1e-8  # Minimal decay applied to learning rate

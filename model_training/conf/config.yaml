@@ -1,0 +1,78 @@
+defaults:
+  - dataset: combined_dataset
+  - augmentation: transform
+  - model: mae_medium
+  - loss: custom_loss
+  - metric: reconstruction_mse
+  - show_prediction: plot_rgb
+  - optimizer: adam
+  - scheduler: none
+  - scheduler_seq: none
+  - override hydra/job_logging: colorlog
+  - override hydra/hydra_logging: colorlog
+  - _self_
+
+dataloader:
+  num_workers: 5
+  pin_memory: true
+  prefetch_factor: 4
+  persistent_workers: true
+  shuffle: true
+
+hparams:
+  nb_epochs: 200
+  batch_size: 6
+  lr: 0.0001
+  valid_interval: 5
+
+general:
+  working_dir: working_env
+  use_cuda: true
+  device_id: 1
+  use_ddp: false
+  parallel:
+    use_parallel: true
+    device_ids: [0, 1, 2] #[0, 1, 2]
+  save_model: true
+  model_path:
+  save_results: true
+  output_folder: F:/Neavus/results_hs/${now:%Y-%m-%d}_${now:%H-%M-%S}
+  use_pretrained: false
+  pretrained_path: C:\Users\xhadoux\Data_projects\spectral_compression\src\model_training\working_env\singlerun\mae_medium\2025-03-21\12-16-24/model_140.pth
+  seed: 51
+
+mlflow:
+  experiment_name: ${model.name}
+  run_name: ${model.name}_${now:%Y-%m-%d}
+
+hydra:
+  run:
+    dir: ./working_env/singlerun/${model.name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+  sweep:
+    dir: ./working_env/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+
+#  sweeper:
+#    params:
+#      dataset.seed: choice(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100)
+#      optimizer.weight_decay: choice(0.1, 0.01, 0.001, 0.0001, 0.00001)
+#      hparams.lr: choice(0.01, 0.001, 0.0001)
+#      hparams.batch_size: choice(12, 24, 60, 84)
+#      dataset.percent_data: choice(0.1, 0.5, 1)
+#       loss.delta: choice(0.001, 0.01, 0.1)
+#      dataset.max_occlusion: choice(25, 50, 100)
+#      model.dropout: choice(0.1, 0.2, 0.3, 0.4, 0.5)
+#      model.spectral_layers: choice(
+#                                 [29, 16, 16],
+#                                 [29, 8, 8],
+#                                 [29, 16, 32, 8],
+#                                 [29, 32, 32, 32, 8])
+
+
+#      model.unet_layers: choice([8, 16, 32, 64],
+#                               [16, 32, 64],
+#                               [16, 32, 64, 128])
+#      model.layer_sizes: choice([29, 8, 5], [29, 16, 5], [29, 8, 8, 5], [29, 16, 16, 5], [29, 8, 8, 8, 5], [29, 16, 16, 16, 5])
+
+#      model.use_batchnorm: choice(false, true)

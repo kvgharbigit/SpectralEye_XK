@@ -1,0 +1,4 @@
+_target_: shared.show_training.save_multi_prediction
+folder: C:\Deep Learning\Glaucoma_rnfl_segmentation\plot
+nb_to_save: 1
+_partial_: true

@@ -1,0 +1,3 @@
+_target_: torch.optim.lr_scheduler.SequentialLR
+_partial_: true
+milestones: [5]  # Transition to CosineAnnealingLR after 5 epochs

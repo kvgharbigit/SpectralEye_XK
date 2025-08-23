@@ -8,7 +8,7 @@ from matplotlib import gridspec
 from matplotlib.gridspec import GridSpec
 from torch import nn
 
-from train_val.epoch_results import EpochResults
+from model_training.train_val.epoch_results import EpochResults
 import numpy as np
 from matplotlib import pyplot as plt
 

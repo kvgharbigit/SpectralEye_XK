@@ -12,7 +12,7 @@ from skimage.io import imread
 from torch.utils.data import Dataset
 from torchvision.transforms import Compose
 
-from utils.split_participants import split_train_validation, get_unique_id_by_filename
+from model_training.utils.split_participants import split_train_validation, get_unique_id_by_filename
 
 import concurrent.futures
 import h5py

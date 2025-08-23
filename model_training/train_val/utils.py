@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import Compose
 
 from eitorch.model_io import load_model_with_loader
-from eitorch.training_loop.hydra_utils import get_instance_repr
+from eitorch.training.config.utils import get_instance_repr
 from eitools.utils.terminal_print import seconds_to_string
 
 logger = logging.getLogger()

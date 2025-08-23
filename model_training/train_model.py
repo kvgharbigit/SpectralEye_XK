@@ -21,14 +21,14 @@ from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR
 from torchvision.transforms import Compose
 
-from src.model_training.plots.plot_bottleneck import display_rgb, display_latent
-from src.model_training.train_val.epoch_results import EpochResults
+from plots.plot_bottleneck import display_rgb, display_latent
+from train_val.epoch_results import EpochResults
 
-from src.model_training.train_val.run_epoch import run_one_epoch
+from train_val.run_epoch import run_one_epoch
 from eitorch.model_io import save_model_state
 
-from src.model_training.train_val.utils import create_training_module, get_datasets, get_dataloaders, EpochInfo
-from src.model_training.utils.save_model import save_model
+from train_val.utils import create_training_module, get_datasets, get_dataloaders, EpochInfo
+from utils.save_model import save_model
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

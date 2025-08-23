@@ -140,6 +140,8 @@ def run_training(cfg: DictConfig):
         show_predictions = None
 
     # --- Set up MLflow experiment ---
+    # Set tracking URI to model_training/mlruns
+    mlflow.set_tracking_uri("file:model_training/mlruns")
     my_experiment = mlflow.set_experiment(cfg.mlflow.experiment_name)
     run_name = cfg.mlflow.run_name
     logger.info(f"Starting experiment: {run_name}")
@@ -150,8 +152,8 @@ def run_training(cfg: DictConfig):
         import os
         from datetime import datetime
         
-        mapping_file = "mlruns/experiment_mapping.json"
-        os.makedirs("mlruns", exist_ok=True)
+        mapping_file = "model_training/mlruns/experiment_mapping.json"
+        os.makedirs("model_training/mlruns", exist_ok=True)
         
         if os.path.exists(mapping_file):
             with open(mapping_file, 'r') as f:
@@ -170,6 +172,28 @@ def run_training(cfg: DictConfig):
         
         with open(mapping_file, 'w') as f:
             json.dump(mapping, f, indent=2)
+        
+        # Also create a mapping file in the experiment directory
+        exp_dir = f"model_training/mlruns/{exp_id}"
+        if os.path.exists(exp_dir):
+            exp_mapping_file = os.path.join(exp_dir, "experiment_info.json")
+            exp_info = {
+                "experiment_id": exp_id,
+                "experiment_name": cfg.mlflow.experiment_name,
+                "model": cfg.model.name,
+                "dataset": getattr(cfg.dataset, 'name', 'unknown'),
+                "run_name": run_name,
+                "created": datetime.now().isoformat(),
+                "config": {
+                    "epochs": cfg.hparams.nb_epochs,
+                    "batch_size": cfg.hparams.batch_size,
+                    "learning_rate": cfg.hparams.lr,
+                    "optimizer": cfg.optimizer.name if hasattr(cfg.optimizer, 'name') else 'unknown'
+                }
+            }
+            with open(exp_mapping_file, 'w') as f:
+                json.dump(exp_info, f, indent=2)
+            logger.info(f"Created experiment info file: {exp_mapping_file}")
         
         logger.info(f"Experiment mapping updated: ID {exp_id} -> {cfg.model.name}")
     

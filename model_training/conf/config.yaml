@@ -47,10 +47,10 @@ mlflow:
 
 hydra:
   run:
-    dir: ./working_env/singlerun/${model.name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ./model_training/working_env/singlerun/${model.name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
   sweep:
-    dir: ./working_env/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ./model_training/working_env/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
     subdir: ${hydra.job.num}
 
 #  sweeper:

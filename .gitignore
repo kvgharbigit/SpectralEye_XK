@@ -345,7 +345,7 @@ multirun/
 !pyproject.toml
 !README.md
 !*.md
-!combined_dataset.yaml
+!**/combined_dataset.yaml
 
 # Keep small example/test data
 !tests/data/

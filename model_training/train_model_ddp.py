@@ -22,6 +22,7 @@ import torch.nn as nn
 import mlflow
 import hydra
 from omegaconf import DictConfig
+from hydra.core.hydra_config import HydraConfig
 
 # Import your custom modules.
 # Adjust the import paths based on your project structure.
@@ -90,11 +91,50 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
     my_experiment = mlflow.set_experiment(cfg.mlflow.experiment_name)
     run_name = cfg.mlflow.run_name
     logger.info(f"[Rank {rank}] Starting experiment: {run_name}")
+    
+    # --- Create experiment mapping for easy identification ---
+    if rank == 0:  # Only main process updates mapping
+        def update_experiment_mapping():
+            import json
+            import os
+            from datetime import datetime
+            
+            mapping_file = "mlruns/experiment_mapping.json"
+            os.makedirs("mlruns", exist_ok=True)
+            
+            if os.path.exists(mapping_file):
+                with open(mapping_file, 'r') as f:
+                    mapping = json.load(f)
+            else:
+                mapping = {}
+            
+            exp_id = str(my_experiment.experiment_id)
+            mapping[exp_id] = {
+                "name": cfg.mlflow.experiment_name,
+                "model": cfg.model.name,
+                "dataset": getattr(cfg.dataset, 'name', 'unknown'),
+                "run_name": run_name,
+                "last_updated": datetime.now().isoformat()
+            }
+            
+            with open(mapping_file, 'w') as f:
+                json.dump(mapping, f, indent=2)
+            
+            logger.info(f"[Rank {rank}] Experiment mapping updated: ID {exp_id} -> {cfg.model.name}")
+        
+        update_experiment_mapping()
 
     # Start an mlflow run
     with mlflow.start_run(experiment_id=my_experiment.experiment_id, run_name=run_name):
         # (Optionally log the entire config or specific parameters)
         mlflow.log_params(OmegaConf.to_container(cfg, resolve=True))
+        
+        # --- Setup CSV logging (only for main process) ---
+        csv_path = None
+        if rank == 0:  # Only main process creates CSV
+            hydra_config = HydraConfig.get()
+            csv_path = f"{hydra_config.runtime.output_dir}/metrics.csv"
+            logger.info(f"[Rank {rank}] Metrics will be saved to: {csv_path}")
 
         nb_epochs = cfg.hparams.nb_epochs
         loss_fn = torch.nn.MSELoss().to(device)
@@ -106,14 +146,14 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
 
             # Training epoch
             train_module.model.train()
-            loss, acc = run_one_epoch(epoch_info, train_module, dl_train, loss_fn, metric_fn, show_predictions, device)
+            loss, acc = run_one_epoch(epoch_info, train_module, dl_train, loss_fn, metric_fn, show_predictions, device, csv_path)
             logger.info(f"[Rank {rank}] Epoch {epoch} TRAIN: Loss={loss:.4f}, Metric={acc:.4f}")
 
             # Validation epoch (if needed)
             if epoch % cfg.hparams.valid_interval == 0:
                 train_module.model.eval()
                 with torch.no_grad():
-                    val_loss, val_acc = run_one_epoch(epoch_info, train_module, dl_val, loss_fn, metric_fn, show_predictions, device)
+                    val_loss, val_acc = run_one_epoch(epoch_info, train_module, dl_val, loss_fn, metric_fn, show_predictions, device, csv_path)
                 logger.info(f"[Rank {rank}] Epoch {epoch} VAL: Loss={val_loss:.4f}, Metric={val_acc:.4f}")
 
             # (Optional) Step the scheduler

@@ -218,32 +218,177 @@ range_penalty_weight: 0.001
 ## Data Pipeline
 
 ### Dataset Implementation
-The system uses `SegmentationDataset` class for loading hyperspectral data:
+The system uses `CombinedDataset` class for loading hyperspectral data:
 
 - **Input format**: HDF5 files with shape (30, 500, 500)
-- **Normalization**: Uses precomputed mean/std from data preparation
+- **Preprocessing**: Applied during training (see below)
 - **Augmentation**: Configurable transforms (rotation, flipping, etc.)
 - **RGB support**: Optional RGB image loading for visualization
 
-### Data Loading Configuration
-```yaml
-# conf/dataset/segmentation_dataset.yaml
-_target_: dataset.segmentation_dataset.SegmentationDataset
-csv_file: "/path/to/dataset.csv"
-transform_type: "augment_basic"
-normalize: true
-load_rgb: true
+### Data Preprocessing During Training
+
+The system applies several preprocessing steps to the data during training:
+
+#### 1. Hyperspectral Data Preprocessing (`utils/preprocess_hsi.py`)
+**Core transformation applied to every batch:**
+```python
+def preprocess_hsi(hs):
+    nb_bands = hs.size(1)
+    mask = hs[:, 0] < 1e-3  # Mask very low values
+    mask = mask.unsqueeze(1).expand(-1, nb_bands, -1, -1).to(hs.device)
+    hs[mask] = 1  # Replace masked values with 1
+    hs = torch.log10(hs)  # Log10 transformation
+    hs = hs + 3  # Shift by +3
+    hs = hs / 3  # Scale by 1/3
+    return hs
 ```
 
-## Experiment Tracking with MLflow
+**Example transformation of pixel values:**
 
-### MLflow Integration
-- **Automatic logging**: Hyperparameters, metrics, and artifacts
-- **Visualization storage**: Training images saved as PNG artifacts
-- **Model checkpointing**: Best models saved with metadata
-- **Experiment organization**: Hierarchical experiment structure
+```
+Normal tissue pixel:
+Original: [0.15, 0.22, 0.31, 0.28, ...]
+Step 1: No masking (0.15 > 1e-3)
+Step 2: log10([0.15, 0.22, 0.31, 0.28, ...]) = [-0.82, -0.66, -0.51, -0.55, ...]
+Step 3: Add 3: [2.18, 2.34, 2.49, 2.45, ...]
+Step 4: Divide by 3: [0.73, 0.78, 0.83, 0.82, ...]
 
-### Accessing Results
+Background/invalid pixel:
+Original: [0.0005, 0.0003, 0.0001, ...]  # Very low reflectance
+Step 1: Mask applied → Set to 1: [1.0, 1.0, 1.0, ...]
+Step 2: log10([1.0, 1.0, 1.0, ...]) = [0.0, 0.0, 0.0, ...]
+Step 3: Add 3: [3.0, 3.0, 3.0, ...]
+Step 4: Divide by 3: [1.0, 1.0, 1.0, ...]
+```
+
+**Purpose:**
+- **Masking**: Background/invalid pixels (< 0.001) → final value 1.0
+- **Log transformation**: Compresses wide dynamic range  
+- **Normalization**: Maps tissue reflectance to ~[0,1], background to 1.0
+
+#### 2. RGB Image Preprocessing (`dataset/combined_dataset.py`)
+```python
+rgb = imread(rgb_file).astype(np.float32) / 255.0
+rgb = torch.tensor(rgb).permute(2, 0, 1)
+```
+- **Normalization**: RGB values normalized to [0,1] range
+- **Format conversion**: HWC to CHW channel ordering
+
+#### 3. Data Augmentation (`conf/augmentation/transform.yaml`)
+Applied with 50% probability during training:
+- **HorizontalFlipTransform**: Random horizontal flipping (p=0.5)
+- **VerticalShiftTransform**: Vertical translation (jitter=150)
+- **HorizontalShiftTransform**: Horizontal translation (jitter=150)  
+- **GaussianTransform**: Gaussian noise injection (jitter=0.8)
+- **RotateTransform**: Random rotation (jitter=30°)
+- **ScaleTransform**: Random scaling (jitter=0.5)
+
+#### 4. Optional Preprocessing Methods
+Additional preprocessing functions available in `utils/preprocess_hsi.py`:
+- **`preprocess_hsi_std_all()`**: Channel-wise normalization using precomputed statistics
+- **`preprocess_hsi_xx()`**: Per-image channel-wise normalization (mean=0, std=1)
+- **Random Channel Dropout**: Available in `utils/random_channel_drop.py` for regularization
+
+### Data Loading Configuration
+
+**Default CSV Path**: The dataset is currently configured to use:
+```
+F:\Foundational_model\data_500\data_all.csv
+```
+
+This path is set in `conf/dataset/combined_dataset.yaml` and can be overridden via command line:
+```bash
+python train_model.py dataset.csv_path="/path/to/your/dataset.csv"
+```
+
+Configuration format:
+```yaml
+# conf/dataset/combined_dataset.yaml
+_target_: src.model_training.dataset.combined_dataset.get_dataset
+csv_path: F:\Foundational_model\data_500\data_all.csv
+train_ratio: 0.9
+seed: 42
+```
+
+## Training Results and Output Locations
+
+The training system stores results in multiple locations for comprehensive tracking and analysis. Here's where to find all your training outputs:
+
+### 1. Hydra Output Directories (Primary Storage)
+
+**Location Pattern**:
+```
+./working_env/singlerun/{model_name}/{YYYY-MM-DD}/{HH-MM-SS}/
+```
+
+**Example**:
+```
+./working_env/singlerun/mae_medium/2025-08-23/14-30-45/
+├── metrics.csv              # CSV metrics log (NEW!)
+├── model_140.pth            # Model checkpoints (every 5 epochs)
+├── model_200.pth
+├── .hydra/                  # Hydra configuration snapshots
+└── train_model.log          # Training logs
+```
+
+**Contents**:
+- **CSV Metrics**: `metrics.csv` - All training metrics in CSV format
+- **Model Checkpoints**: `model_{epoch}.pth` files saved at validation intervals
+- **Configuration**: Complete Hydra config snapshots in `.hydra/` folder
+- **Logs**: Training logs with detailed output
+
+### 2. MLflow Experiment Tracking
+
+**Location**: `./mlruns/` directory
+
+**Structure**:
+```
+./mlruns/
+├── experiment_mapping.json  # Human-readable experiment mapping (NEW!)
+├── 0/                       # Experiment ID directories
+│   ├── meta.yaml           # Experiment metadata
+│   └── {run_id}/           # Individual run data
+│       ├── metrics/        # Metrics per epoch
+│       ├── params/         # All hyperparameters
+│       ├── artifacts/      # Figures and visualizations
+│       └── meta.yaml       # Run metadata
+└── 1/                      # Another experiment
+```
+
+**New Feature - Experiment Mapping**:
+The `experiment_mapping.json` file provides human-readable experiment information:
+```json
+{
+  "0": {
+    "name": "mae_medium",
+    "model": "mae_medium", 
+    "dataset": "combined_dataset",
+    "run_name": "mae_medium_2025-08-23",
+    "last_updated": "2025-08-23T14:30:45"
+  }
+}
+```
+
+### 3. Accessing Your Results
+
+#### Option A: CSV Metrics (Recommended for Data Analysis)
+**Location**: Each run's Hydra directory contains `metrics.csv`
+
+**Contents**:
+```csv
+step,timestamp,CustomLoss train,ReconstructionMSE train,Learning Rate,CustomLoss val,ReconstructionMSE val
+1,2025-08-23T14:30:45.123456,0.0234,0.0156,0.0001,0.0198,0.0134
+2,2025-08-23T14:31:02.456789,0.0221,0.0149,0.0001,0.0185,0.0128
+```
+
+**Usage**:
+```python
+import pandas as pd
+df = pd.read_csv('./working_env/singlerun/mae_medium/2025-08-23/14-30-45/metrics.csv')
+print(df.head())
+```
+
+#### Option B: MLflow UI (Recommended for Interactive Exploration)
 1. **Start MLflow UI**:
    ```bash
    cd model_training
@@ -255,6 +400,46 @@ load_rgb: true
 3. **View experiments**: Browse experiments by name (e.g., "mae_large")
 
 4. **Inspect runs**: View metrics, parameters, and artifacts
+
+#### Option C: MLflow Python API
+```python
+import mlflow
+import pandas as pd
+
+# Get experiment by name
+experiment = mlflow.get_experiment_by_name("mae_medium")
+
+# Get all runs from experiment
+runs = mlflow.search_runs(experiment.experiment_id)
+
+# Access metrics
+metrics_df = runs[['metrics.CustomLoss train', 'metrics.ReconstructionMSE train']]
+```
+
+### 4. Metrics Logged
+
+**Training Metrics (logged every epoch)**:
+- **CustomLoss train/val**: Combined loss (reconstruction + penalties)
+- **ReconstructionMSE train/val**: Pure reconstruction error
+- **Learning Rate**: Current optimizer learning rate
+
+**Parameters Logged**:
+- All Hydra configuration parameters
+- Model architecture settings
+- Training hyperparameters  
+- Dataset configuration
+- Optimizer and scheduler settings
+
+**Artifacts Logged**:
+- **Training visualizations**: `{epoch:04d}_{batch:03d}_{plot_name}.png`
+- **Disease-specific plots**: RGB reconstructions per disease type
+- **Latent space visualizations**: Encoded representation plots
+
+### 5. External Results Directory (Optional)
+
+**Location**: `F:/Neavus/results_hs/{YYYY-MM-DD}_{HH-MM-SS}/`
+- Only used when `general.save_results: true` in config
+- Stores additional outputs and final results
 
 ## Visualization
 

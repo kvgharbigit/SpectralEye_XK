@@ -1,4 +1,5 @@
 _target_: src.model_training.losses.custom_loss.CustomLoss
 reconstruction_weight: 1.0
-angle_weight: 1.0
-variance_weight: 0.1
+angle_weight: 0.0  # Not currently used
+variance_weight: 0.0  # Not currently used  
+range_weight: 0.1  # Weight for range penalty loss

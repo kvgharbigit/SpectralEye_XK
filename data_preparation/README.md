@@ -71,6 +71,28 @@ Creates comprehensive dataset catalogs:
 - Outputs combined CSV file for training
 - DataFrame columns: `ID`, `label`, `hs_file`, `rgb_file`
 
+**RGB Generation Process:**
+```python
+from eitools.hs.hs_to_rgb import hs_to_rgb
+
+def create_rgb_files(hs_files):
+    for hs_file in hs_files:
+        rgb_file = hs_file.parent / (hs_file.stem + '_rgb.png')
+        if not rgb_file.exists():
+            hs = DataHsImage(hs_file)  # Load hyperspectral cube
+            rgb = hs_to_rgb(hs)        # Convert to RGB using spectral mapping
+            imsave(rgb_file, np.array(rgb * 255, dtype='uint8'))
+```
+
+The RGB conversion uses the `eitools` library to map hyperspectral wavelengths to RGB colors:
+- **Wavelength mapping**: 30 selected bands (450-900 nm range) converted to RGB
+- **Channel mapping**: Specific bands mapped to approximate RGB channels:
+  - Red: Band 12 (~615 nm)
+  - Green: Band 8 (~550 nm) 
+  - Blue: Band 1 (~465 nm)
+- **Output format**: 8-bit PNG files (500×500×3)
+- **Purpose**: Provides visual reference for hyperspectral reconstruction validation
+
 ### 4. Quality Control
 
 #### `clean_hs_matching_rgb.py`

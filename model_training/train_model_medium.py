@@ -126,21 +126,57 @@ def run_training(cfg: DictConfig):
 
     run_name = cfg.mlflow.run_name
     logger.info(f'Starting experiment: {run_name}')
+    
+    # --- Create experiment mapping for easy identification ---
+    def update_experiment_mapping():
+        import json
+        import os
+        from datetime import datetime
+        
+        mapping_file = "mlruns/experiment_mapping.json"
+        os.makedirs("mlruns", exist_ok=True)
+        
+        if os.path.exists(mapping_file):
+            with open(mapping_file, 'r') as f:
+                mapping = json.load(f)
+        else:
+            mapping = {}
+        
+        exp_id = str(my_experiment.experiment_id)
+        mapping[exp_id] = {
+            "name": cfg.mlflow.experiment_name,
+            "model": cfg.model.name,
+            "dataset": getattr(cfg.dataset, 'name', 'unknown'),
+            "run_name": run_name,
+            "last_updated": datetime.now().isoformat()
+        }
+        
+        with open(mapping_file, 'w') as f:
+            json.dump(mapping, f, indent=2)
+        
+        logger.info(f"Experiment mapping updated: ID {exp_id} -> {cfg.model.name}")
+    
+    update_experiment_mapping()
 
     with mlflow.start_run(experiment_id=my_experiment.experiment_id, run_name=run_name):
         # Log configuration and parameters
         mlflow.log_params(get_all_hydra_parameters(cfg))
 
+        # --- Setup CSV logging ---
+        hydra_config = HydraConfig.get()
+        csv_path = f"{hydra_config.runtime.output_dir}/metrics.csv"
+        logger.info(f"Metrics will be saved to: {csv_path}")
+
         logger.info('Starting training...')
         for epoch in range(1, cfg.hparams.nb_epochs + 1):
             epoch_info = EpochInfo(epoch, cfg.hparams.nb_epochs, cfg.hparams.batch_size * epoch)
             train_module.model.train()
-            loss, acc = run_one_epoch(epoch_info, train_module, dl_train, loss_fn, metric_fn, None)
+            loss, acc = run_one_epoch(epoch_info, train_module, dl_train, loss_fn, metric_fn, None, csv_path)
 
             if epoch % cfg.hparams.valid_interval == 0:
                 train_module.model.eval()
                 with torch.no_grad():
-                    loss_val, acc_val = run_one_epoch(epoch_info, train_module, dl_val, loss_fn, metric_fn, show_predictions)
+                    loss_val, acc_val = run_one_epoch(epoch_info, train_module, dl_val, loss_fn, metric_fn, show_predictions, csv_path)
 
             if train_module.scheduler:
                 if isinstance(train_module.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):

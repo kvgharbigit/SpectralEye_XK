@@ -4,12 +4,13 @@ import torch.nn.functional as F
 
 
 class CustomLoss(nn.Module):
-    def __init__(self, reconstruction_weight= 1.0, angle_weight=1.0, variance_weight=1.0):
+    def __init__(self, reconstruction_weight=1.0, angle_weight=0.0, variance_weight=0.0, range_weight=0.1):
         super(CustomLoss, self).__init__()
 
         self.reconstruction_weight = reconstruction_weight
         self.angle_weight = angle_weight
         self.variance_weight = variance_weight
+        self.range_weight = range_weight
 
 
     def forward(self, reconstructed, original, latent, rgb):
@@ -42,12 +43,10 @@ class CustomLoss(nn.Module):
         range_loss = range_penalty_loss(latent)
         # contrast_loss = decorrelation_loss(latent)
 
-        # Total Loss
-        # total_loss = (self.reconstruction_weight * recon_loss +
-        #               self.angle_weight * sam_loss +
-        #               self.variance_weight * contrast_loss)
-        # total_loss = recon_loss + 0.00 * rgb_loss + 0.1 * contrast_loss + 1.0 * latent_loss
-        total_loss = recon_loss + 0.1 * range_loss
+        # Total Loss using configured weights
+        total_loss = (self.reconstruction_weight * recon_loss + 
+                     self.range_weight * range_loss)
+        
         return total_loss
 
 

@@ -6,16 +6,51 @@ from eitools.utils import progress_bar, seconds_to_string
 from matplotlib import pyplot as plt
 
 import logging
+import csv
+import os
+import pandas as pd
+from datetime import datetime
 from src.model_training.utils.preprocess_hsi import preprocess_hsi
 
 logger = logging.getLogger()
 
-def log_metrics(metrics: dict[str, float], current_step: int) -> None:
-    """Log the metrics in mlflow."""
+def log_metrics(metrics: dict[str, float], current_step: int, csv_path: str = None) -> None:
+    """ Log the metrics in mlflow and CSV. """
+
     for key, value in metrics.items():
         mlflow.log_metric(key=f"{key}", value=value, step=current_step)
+    
+    # Log to CSV if path provided
+    if csv_path:
+        log_metrics_to_csv(metrics, current_step, csv_path)
 
-def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_predictions, device):
+
+def log_metrics_to_csv(metrics: dict[str, float], current_step: int, csv_path: str) -> None:
+    """ Log metrics to CSV file. """
+    
+    # Prepare the row data
+    row_data = {'step': current_step, 'timestamp': datetime.now().isoformat()}
+    row_data.update(metrics)
+    
+    # Check if file exists to determine if we need headers
+    file_exists = os.path.exists(csv_path)
+    
+    # Create directory if it doesn't exist
+    csv_dir = os.path.dirname(csv_path)
+    if csv_dir:  # Only create if there's a directory path
+        os.makedirs(csv_dir, exist_ok=True)
+    
+    # Write to CSV
+    with open(csv_path, 'a', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=row_data.keys())
+        
+        # Write header if file is new
+        if not file_exists:
+            writer.writeheader()
+        
+        writer.writerow(row_data)
+
+def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_predictions, device, csv_path: str = None):
     """Train or validate for one epoch using the specified device."""
     t_start_epoch = perf_counter()
     mode = 'train' if train_module.model.training else 'val'
@@ -87,7 +122,7 @@ def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_pre
     }
     if mode == 'train':
         log_values['Learning Rate'] = train_module.optimizer.param_groups[0]['lr']
-    log_metrics(log_values, epoch_info.epoch)
+    log_metrics(log_values, epoch_info.epoch, csv_path)
 
     elapsed_time = seconds_to_string(perf_counter() - t_start_epoch)
 

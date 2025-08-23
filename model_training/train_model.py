@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import yaml
 from eitools.utils import seconds_to_string
-from eitorch.training_loop.hydra_utils import get_all_hydra_parameters, get_instance_repr
+from eitorch.training.config.utils import get_all_hydra_parameters, get_instance_repr
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
 from omegaconf import DictConfig

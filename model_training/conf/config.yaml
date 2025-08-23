@@ -8,8 +8,8 @@ defaults:
   - optimizer: adam
   - scheduler: none
   - scheduler_seq: none
-  - override hydra/job_logging: colorlog
-  - override hydra/hydra_logging: colorlog
+  - override hydra/job_logging: default
+  - override hydra/hydra_logging: default
   - _self_
 
 dataloader:

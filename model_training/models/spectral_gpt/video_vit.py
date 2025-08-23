@@ -1,9 +1,9 @@
 # import util.logging as logging
 import torch
 import torch.nn as nn
-from src.model_training.models.spectral_gpt.utils_tuple import to_2tuple
-from src.model_training.models.spectral_gpt.drop_path import DropPath
-from src.model_training.models.spectral_gpt.mlp import Mlp
+from .utils_tuple import to_2tuple
+from .drop_path import DropPath
+from .mlp import Mlp
 
 # logger = logging.get_logger(__name__)
 

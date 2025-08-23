@@ -14,7 +14,7 @@ from functools import partial
 
 import torch
 import torch.nn as nn
-from src.model_training.models.spectral_gpt import video_vit
+from . import video_vit
 # from util.logging import master_print as print
 
 

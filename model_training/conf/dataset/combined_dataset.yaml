@@ -1,0 +1,8 @@
+_target_: src.model_training.dataset.combined_dataset.get_dataset
+_partial_: true
+
+csv_path: F:\Foundational_model\data_500\data_all.csv
+train_ratio: 0.9
+seed: 42
+
+

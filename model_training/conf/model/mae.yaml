@@ -1,4 +1,4 @@
-_target_: src.model_training.models.spectral_gpt.models_mae_spectral.MaskedAutoencoderViT
+_target_: model_training.models.spectral_gpt.models_mae_spectral.MaskedAutoencoderViT
 img_size: 500
 num_channels: 1
 num_wavelengths: 30

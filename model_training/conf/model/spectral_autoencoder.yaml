@@ -1,4 +1,4 @@
-_target_: src.model_training.models.spectral_autoencoder.SpectralAutoencoder2D
+_target_: model_training.models.spectral_autoencoder.SpectralAutoencoder2D
 spectral_layers:  [29, 256, 128, 64, 32, 3]
 #spectral_layers:  [29, 6, 3]
 encoder_activation: "none"

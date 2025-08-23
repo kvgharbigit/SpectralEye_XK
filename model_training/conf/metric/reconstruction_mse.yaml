@@ -1,1 +1,1 @@
-_target_: src.model_training.metrics.reconstruction_mse.ReconstructionMSE
+_target_: model_training.metrics.reconstruction_mse.ReconstructionMSE

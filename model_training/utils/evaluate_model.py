@@ -2,9 +2,9 @@ import torch
 from PIL import Image
 from path import Path
 
-from src.segmentation.utils.register_image import register_image
-from src.utils.normalise_parameters import unnormalize_parameters
-from src.utils.single_to_three_channels import single_to_three_channel
+from segmentation.utils.register_image import register_image
+from utils.normalise_parameters import unnormalize_parameters
+from utils.single_to_three_channels import single_to_three_channel
 
 
 def evalutate_model_dataloader(model, transformation, dataloader, output_folder):

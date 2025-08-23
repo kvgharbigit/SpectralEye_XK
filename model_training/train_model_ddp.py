@@ -26,9 +26,9 @@ from hydra.core.hydra_config import HydraConfig
 
 # Import your custom modules.
 # Adjust the import paths based on your project structure.
-from src.model_training.train_val.run_epoch import run_one_epoch
-from src.model_training.train_val.utils import create_training_module, get_datasets, get_dataloaders, EpochInfo
-from src.model_training.utils.save_model import save_model
+from train_val.run_epoch import run_one_epoch
+from train_val.utils import create_training_module, get_datasets, get_dataloaders, EpochInfo
+from utils.save_model import save_model
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
 

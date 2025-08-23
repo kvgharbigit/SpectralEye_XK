@@ -7,11 +7,11 @@ from eitools.utils import progress_bar, seconds_to_string
 from matplotlib import pyplot as plt
 from torch import nn
 
-from src.model_training.train_val.epoch_results import EpochResults
-from src.model_training.train_val.utils import TrainingModule, EpochInfo
-from src.model_training.utils.preprocess_hsi import preprocess_hsi
+from train_val.epoch_results import EpochResults
+from train_val.utils import TrainingModule, EpochInfo
+from utils.preprocess_hsi import preprocess_hsi
 from eitools.hs.hs_to_rgb import hs_to_rgb_from_array
-from src.model_training.utils.random_channel_drop import RandomChannelDrop
+from utils.random_channel_drop import RandomChannelDrop
 from eitools.utils.progress_bar import ProgressBar
 
 import logging

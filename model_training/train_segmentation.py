@@ -1,8 +1,8 @@
 from path import Path
 import torch
 import torch.nn as nn
-from src.model_training.models.spectral_gpt.models_mae_spectral_segmentation import mae_vit_base_patch8_256
-from src.model_training.models.spectral_gpt.models_mae_spectral_segmentation import SegmentationHead
+from models.spectral_gpt.models_mae_spectral_segmentation import mae_vit_base_patch8_256
+from models.spectral_gpt.models_mae_spectral_segmentation import SegmentationHead
 import numpy as np
 
 # model_file = r'C:\Users\xhadoux\Data_projects\spectral_compression\src\model_training\working_env\singlerun\2024-12-18\17-15-38\model.pth'

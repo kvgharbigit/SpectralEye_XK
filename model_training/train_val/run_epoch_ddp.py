@@ -74,8 +74,13 @@ def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_pre
         loss_batch, pred, mask = train_module.model(hs_cube)
         loss = torch.mean(loss_batch)
 
-        # Reconstruct output (ensure the model's decoder is on the same device)
-        reconstructed_output = train_module.model.module.decoder.unpatchify(pred)
+        # Reconstruct output (handle both DDP and non-DDP models)
+        if hasattr(train_module.model, 'module'):
+            decoder = train_module.model.module.decoder
+        else:
+            decoder = train_module.model.decoder
+        
+        reconstructed_output = decoder.unpatchify(pred)
         reconstructed_output = reconstructed_output.squeeze(1)
 
         # Compute metric (both tensors are now on the same device)

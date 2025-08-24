@@ -30,6 +30,7 @@ general:
   use_cuda: true
   device_id: 1
   use_ddp: false
+  use_amp: true
   parallel:
     use_parallel: true
     device_ids: [0, 1, 2] #[0, 1, 2]

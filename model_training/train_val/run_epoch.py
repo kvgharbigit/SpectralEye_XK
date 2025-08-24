@@ -87,10 +87,12 @@ def run_one_epoch(epoch_info: EpochInfo, train_module: TrainingModule, loader, l
 
         train_module.zero_grad()  # Reset gradients
 
-        loss_batch, pred, mask = train_module.model(hs_cube)
-        loss = torch.mean(loss_batch)
+        # Forward pass with mixed precision
+        with torch.cuda.amp.autocast(enabled=getattr(train_module, 'use_amp', False)):
+            loss_batch, pred, mask = train_module.model(hs_cube)
+            loss = torch.mean(loss_batch)
 
-        # Access the decoder depending on whether the model is wrapped or not.
+        # Access the decoder depending on whether the model is wrapped or not - outside autocast for metrics
         if isinstance(train_module.model, nn.DataParallel):
             decoder = train_module.model.module.decoder
         else:

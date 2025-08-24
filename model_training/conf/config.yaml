@@ -13,7 +13,7 @@ defaults:
   - _self_
 
 dataloader:
-  num_workers: 5
+  num_workers: 10
   pin_memory: true
   prefetch_factor: 4
   persistent_workers: true
@@ -21,7 +21,7 @@ dataloader:
 
 hparams:
   nb_epochs: 200
-  batch_size: 6
+  batch_size: 8
   lr: 0.0001
   valid_interval: 2
 

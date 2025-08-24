@@ -141,24 +141,28 @@ def display_rgb(hs_cubes, reconstructed_outputs, rgb_images, labels, nb_to_plot=
 
     fig = plt.figure(figsize=(12, nb_to_plot * 3))  # Adjust the figure size
     gs = GridSpec(nb_to_plot, 4, figure=fig, wspace=0.3, hspace=0.3)  # GridSpec for layout
-    mse = nn.MSELoss(reduction='none')
-
-    # Avoid creating new tensors - compute MSE directly on numpy arrays or use existing tensors
-    if isinstance(reconstructed_outputs, np.ndarray) and isinstance(hs_cubes, np.ndarray):
-        mse_spectra = np.mean((reconstructed_outputs - hs_cubes) ** 2, axis=(2, 3))
+    
+    # Only extract the samples we need to avoid large memory allocations
+    selected_hs = hs_cubes[frame_indexes]
+    selected_recon = reconstructed_outputs[frame_indexes] 
+    selected_rgb = rgb_images[frame_indexes]
+    
+    # Compute MSE only for selected samples
+    if isinstance(selected_recon, np.ndarray) and isinstance(selected_hs, np.ndarray):
+        mse_spectra = np.mean((selected_recon - selected_hs) ** 2, axis=(2, 3))
     else:
-        # If they're already tensors, use them directly
-        mse_spectra = mse(reconstructed_outputs, hs_cubes).mean(dim=(2, 3)).cpu().detach().numpy()
+        mse = nn.MSELoss(reduction='none')
+        mse_spectra = mse(selected_recon, selected_hs).mean(dim=(2, 3)).cpu().detach().numpy()
 
-    input_spectra = hs_cubes.mean(axis=(2, 3))
-    output_spectra = reconstructed_outputs.mean(axis=(2, 3))
+    input_spectra = selected_hs.mean(axis=(2, 3))
+    output_spectra = selected_recon.mean(axis=(2, 3))
 
-    for cpt, f_index in enumerate(frame_indexes):
-        reconstructed_output = reconstructed_outputs[f_index].transpose(1, 2, 0)
-        rgb = rgb_images[f_index].transpose(1, 2, 0)
-        mse = mse_spectra[f_index]
-        input_spectrum = input_spectra[f_index]
-        output_spectrum = output_spectra[f_index]
+    for cpt in range(nb_to_plot):
+        reconstructed_output = selected_recon[cpt].transpose(1, 2, 0)
+        rgb = selected_rgb[cpt].transpose(1, 2, 0)
+        mse = mse_spectra[cpt]
+        input_spectrum = input_spectra[cpt]
+        output_spectrum = output_spectra[cpt]
 
         # Keep channels
         reconstructed_rgb = reconstructed_output[:, :, [12, 8, 1]]

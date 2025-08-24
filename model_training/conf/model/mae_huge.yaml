@@ -16,4 +16,4 @@ model:
   decoder_num_heads: 8
 
   mlp_ratio: 4
-  mask_ratio: 0.9
+  mask_ratio: 0.8

@@ -173,11 +173,25 @@ def get_dataset(csv_path: str, train_ratio: float, seed: int, trial_mode: bool =
         # Filter participants with the current label
         df_label = df[df['label'] == label]
 
-        # Randomly sample 10 participants for validation
-        if label != "Hypercolour":
-            val_sample = df_label.sample(n=10, random_state=seed)
+        # In trial mode, adjust validation sample size based on available data
+        if trial_mode:
+            # Use smaller validation samples for trial mode
+            if label != "Hypercolour":
+                val_size = min(2, len(df_label) // 2)  # Use 2 or half the data, whichever is smaller
+            else:
+                val_size = min(4, len(df_label) // 2)  # Use 4 or half the data, whichever is smaller
         else:
-            val_sample = df_label.sample(n=20, random_state=seed)
+            # Regular mode validation sizes
+            if label != "Hypercolour":
+                val_size = 10
+            else:
+                val_size = 20
+        
+        # Skip labels with insufficient data
+        if len(df_label) < val_size:
+            continue
+            
+        val_sample = df_label.sample(n=val_size, random_state=seed)
         # Add the selected validation samples
         df_val = pd.concat([df_val, val_sample])
 

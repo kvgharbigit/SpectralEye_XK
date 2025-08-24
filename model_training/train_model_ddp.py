@@ -51,17 +51,10 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
 
     # Initialize DDP if enabled
     if cfg.general.use_ddp:
-        store = dist.TCPStore(
-            "127.0.0.1",  # Use the local loopback interface.
-            12355,        # Make sure this port is free.
-            world_size,
-            is_master=(rank == 0),
-            wait_for_workers=True,
-            use_libuv=False  # Explicitly disable libuv.
-        )
+        # Initialize process group without TCPStore for Windows compatibility
         dist.init_process_group(
             backend="gloo",  # "gloo" is typically used on Windows.
-            store=store,
+            init_method="tcp://localhost:12355",
             rank=rank,
             world_size=world_size
         )
@@ -136,8 +129,13 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
     # --- Setup CSV logging (only for main process) ---
     csv_path = None
     if rank == 0:  # Only main process creates CSV
-        hydra_config = HydraConfig.get()
-        csv_path = f"{hydra_config.runtime.output_dir}/metrics.csv"
+        # Create a simple output directory since HydraConfig isn't available in spawned processes
+        import os
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        output_dir = f"outputs/ddp_run_{timestamp}"
+        os.makedirs(output_dir, exist_ok=True)
+        csv_path = f"{output_dir}/metrics.csv"
         logger.info(f"[Rank {rank}] Metrics will be saved to: {csv_path}")
 
     nb_epochs = cfg.hparams.nb_epochs
@@ -168,7 +166,12 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
 
         # (Optional) Save the model checkpoint at intervals (only rank 0)
         if epoch % cfg.hparams.valid_interval == 0 and cfg.general.save_model and rank == 0:
-            output_dir = HydraConfig.get().runtime.output_dir
+            # Use the same output directory as CSV
+            import os
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            output_dir = f"outputs/ddp_run_{timestamp}"
+            os.makedirs(output_dir, exist_ok=True)
             model_path = f"{output_dir}/model_{epoch}.pth"
             save_model(train_module.model, model_path, cfg.general.use_ddp or cfg.general.parallel.use_parallel)
             logger.info(f"Saved model checkpoint: {model_path}")

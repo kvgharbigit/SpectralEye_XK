@@ -38,7 +38,7 @@ general:
   save_results: true
   output_folder: F:/Neavus/results_hs/${now:%Y-%m-%d}_${now:%H-%M-%S}
   use_pretrained: false
-  pretrained_path: C:\Users\xhadoux\Data_projects\spectral_compression\src\model_training\working_env\singlerun\mae_medium\2025-03-21\12-16-24/model_140.pth
+  pretrained_path:
   seed: 51
 
 mlflow:

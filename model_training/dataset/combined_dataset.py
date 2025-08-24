@@ -138,7 +138,7 @@ class SegmentationDataset_slow(Dataset):
         return hs, label, rgb
 
 
-def get_dataset(csv_path: str, train_ratio: float, seed: int, transform: Optional[Compose] = None) -> tuple[Dataset, Dataset]:
+def get_dataset(csv_path: str, train_ratio: float, seed: int, trial_mode: bool = False, trial_size: int = 1000, transform: Optional[Compose] = None) -> tuple[Dataset, Dataset]:
     """
     Load the dataset from a CSV file, split it, and create training and validation datasets.
 
@@ -146,6 +146,9 @@ def get_dataset(csv_path: str, train_ratio: float, seed: int, transform: Optiona
         csv_path (str): Path to the CSV file containing the data.
         train_ratio (float): Ratio of training data.
         seed (int): Random seed for splitting.
+        trial_mode (bool): Whether to use only a subset of data for trial runs.
+        trial_size (int): Number of observations to use in trial mode.
+        transform (Optional[Compose]): Transformations to apply to the data.
 
     Returns:
         Tuple[Dataset, Dataset]: Training and validation datasets.
@@ -153,6 +156,10 @@ def get_dataset(csv_path: str, train_ratio: float, seed: int, transform: Optiona
 
     # Load the CSV into a DataFrame
     df = pd.read_csv(csv_path)
+    
+    # Apply trial mode sampling if enabled
+    if trial_mode:
+        df = df.sample(n=min(trial_size, len(df)), random_state=seed).reset_index(drop=True)
     # Separate "Reflec" and other labels
     non_reflec_labels = df['label'].unique().tolist()
     non_reflec_labels.remove('All')

@@ -4,5 +4,7 @@ _partial_: true
 csv_path: F:\Foundational_model\data_500\data_all.csv
 train_ratio: 0.9
 seed: 42
+trial_mode: false
+trial_size: 1000
 
 

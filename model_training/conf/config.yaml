@@ -37,7 +37,7 @@ general:
   save_model: true
   model_path:
   save_results: true
-  output_folder: F:/Neavus/results_hs/${now:%Y-%m-%d}_${now:%H-%M-%S}
+  output_folder: ./model_training/working_env/results/${now:%Y-%m-%d}_${now:%H-%M-%S}
   use_pretrained: false
   pretrained_path:
   seed: 51

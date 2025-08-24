@@ -145,7 +145,7 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
         # Create a simple output directory since HydraConfig isn't available in spawned processes
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        output_dir = f"outputs/ddp_run_{timestamp}"
+        output_dir = f"model_training/working_env/ddp_runs/ddp_run_{timestamp}"
         os.makedirs(output_dir, exist_ok=True)
         csv_path = f"{output_dir}/metrics.csv"
         logger.info(f"[Rank {rank}] Metrics will be saved to: {csv_path}")
@@ -181,7 +181,7 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
             # Use the same output directory as CSV (reuse timestamp from earlier)
             from datetime import datetime
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            output_dir = f"outputs/ddp_run_{timestamp}"
+            output_dir = f"model_training/working_env/ddp_runs/ddp_run_{timestamp}"
             os.makedirs(output_dir, exist_ok=True)
             model_path = f"{output_dir}/model_{epoch}.pth"
             save_model(train_module.model, model_path, cfg.general.use_ddp or cfg.general.parallel.use_parallel)

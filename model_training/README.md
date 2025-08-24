@@ -337,11 +337,11 @@ The training system stores results in multiple locations depending on the traini
 ./working_env/singlerun/{model_name}/{YYYY-MM-DD}/{HH-MM-SS}/
 ```
 
-### 2. DDP Training Output (New)
+### 2. DDP Training Output
 
 **Location Pattern**:
 ```
-./outputs/ddp_run_{YYYY-MM-DD}_{HH-MM-SS}/
+./model_training/working_env/ddp_runs/ddp_run_{YYYY-MM-DD}_{HH-MM-SS}/
 ```
 
 **Single GPU Example**:
@@ -356,7 +356,7 @@ The training system stores results in multiple locations depending on the traini
 
 **DDP Training Example**:
 ```
-./outputs/ddp_run_2025-08-25_00-00-21/
+./model_training/working_env/ddp_runs/ddp_run_2025-08-25_00-00-21/
 ├── metrics.csv              # Aggregated metrics from all GPUs
 ├── model_10.pth            # Model checkpoints (saved by rank 0 only)
 ├── model_20.pth
@@ -471,7 +471,7 @@ metrics_df = runs[['metrics.CustomLoss train', 'metrics.ReconstructionMSE train'
 
 | Aspect | Single GPU/DataParallel | DDP Training |
 |--------|-------------------------|--------------|
-| **Output Location** | `./working_env/singlerun/` | `./outputs/ddp_run_*/` |
+| **Output Location** | `./working_env/singlerun/` | `./working_env/ddp_runs/ddp_run_*/` |
 | **MLflow Runs** | Single run | Single consolidated run (rank 0 only) |
 | **Model Saving** | All processes | Rank 0 only (no duplicates) |
 | **CSV Logging** | Standard location | Simplified timestamped directory |

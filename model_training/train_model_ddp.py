@@ -4,8 +4,6 @@
 import os
 # Set the environment variable for libuv BEFORE any torch imports.
 os.environ["TORCH_DISTRIBUTED_USE_LIBUV"] = "0"
-os.environ["MASTER_ADDR"] = "127.0.0.1"    # Force the master address to the loopback interface
-os.environ["MASTER_PORT"] = "12355"          # Make sure this port is free
 # (Optional) Register a custom resolver for time-based interpolations.
 from omegaconf import OmegaConf
 from datetime import datetime
@@ -51,17 +49,15 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
 
     # Initialize DDP if enabled
     if cfg.general.use_ddp:
-        # Initialize process group with environment variables for Windows
+        # Set environment variables for each process
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "12355"
         os.environ["RANK"] = str(rank)
         os.environ["WORLD_SIZE"] = str(world_size)
         
         dist.init_process_group(
-            backend="gloo",  # "gloo" is typically used on Windows.
-            init_method="env://",
-            rank=rank,
-            world_size=world_size
+            backend="gloo",
+            init_method="env://"
         )
 
     # Load dataset and dataloaders

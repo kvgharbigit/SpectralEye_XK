@@ -51,10 +51,15 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
 
     # Initialize DDP if enabled
     if cfg.general.use_ddp:
-        # Initialize process group without TCPStore for Windows compatibility
+        # Initialize process group with environment variables for Windows
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "12355"
+        os.environ["RANK"] = str(rank)
+        os.environ["WORLD_SIZE"] = str(world_size)
+        
         dist.init_process_group(
             backend="gloo",  # "gloo" is typically used on Windows.
-            init_method="tcp://localhost:12355",
+            init_method="env://",
             rank=rank,
             world_size=world_size
         )

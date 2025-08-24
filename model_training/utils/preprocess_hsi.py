@@ -8,6 +8,10 @@ SP_STD_FILE = r'C:\Users\xhadoux\Data_projects\spectral_compression\src\data_pre
 
 
 def preprocess_hsi(hs):
+    # Force FP32 for numerical stability in preprocessing
+    original_dtype = hs.dtype
+    hs = hs.float()  # Always use FP32 for preprocessing
+    
     nb_bands = hs.size(1)
     mask = hs[:, 0] < 1e-3
     mask = mask.unsqueeze(1).expand(-1, nb_bands, -1, -1).to(hs.device)
@@ -16,7 +20,9 @@ def preprocess_hsi(hs):
 
     hs = hs + 3
     hs = hs / 3
-    return hs
+    
+    # Convert back to original dtype for memory efficiency
+    return hs.to(original_dtype)
 
 
 def preprocess_hsi_std_all(hs, sp_mean_file=SP_MEAN_FILE, sp_std_file=SP_STD_FILE):

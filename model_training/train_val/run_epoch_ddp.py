@@ -152,7 +152,9 @@ def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_pre
         }
         if mode == 'train':
             log_values['Learning Rate'] = train_module.optimizer.param_groups[0]['lr']
-        log_metrics(log_values, epoch_info.epoch, csv_path)
+        # Only rank 0 logs metrics to avoid conflicts
+        if rank == 0:
+            log_metrics(log_values, epoch_info.epoch, csv_path)
 
     elapsed_time = seconds_to_string(perf_counter() - t_start_epoch)
 

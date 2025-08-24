@@ -13,9 +13,9 @@ defaults:
   - _self_
 
 dataloader:
-  num_workers: 6
+  num_workers: 2
   pin_memory: true
-  prefetch_factor: 4
+  prefetch_factor: 2
   persistent_workers: true
   shuffle: true
 

@@ -2,5 +2,5 @@ plots:
   prediction:
     _target_: model_training.plots.plot_bottleneck.display_rgb
     _partial_: true
-    nb_to_plot: 2
+    nb_to_plot: ${hparams.batch_size}
 

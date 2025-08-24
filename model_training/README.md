@@ -61,10 +61,11 @@ Primary training script for single-GPU training:
 
 #### `train_model_ddp.py`
 Distributed Data Parallel training for multi-GPU setups:
-- Supports multiple GPUs across nodes
-- Synchronized batch normalization
-- Gradient synchronization
-- Efficient memory utilization
+- Supports multiple GPUs with proper process synchronization
+- Automatic gradient averaging across all GPUs
+- Memory efficient with data distribution
+- Clean logging and experiment tracking (single MLflow run)
+- Proper metrics aggregation from all processes
 
 #### `train_model_medium.py`
 Specialized training script optimized for medium-sized models:
@@ -161,9 +162,9 @@ mask_ratio: 0.8
    python train_model.py model=mae_base
    ```
 
-3. **Multi-GPU training**:
+3. **Multi-GPU DDP training** (recommended for multiple GPUs):
    ```bash
-   python train_model_ddp.py
+   python train_model_ddp.py model=mae_base hparams.nb_epochs=50 general.use_ddp=true
    ```
 
 4. **Custom configuration**:
@@ -192,6 +193,21 @@ python train_model.py model=mae_base hparams.batch_size=6
 
 # Large model with reduced batch size
 python train_model.py model=mae_large hparams.batch_size=2
+
+# DDP training for faster multi-GPU training
+python train_model_ddp.py model=mae_tiny hparams.nb_epochs=30 general.use_ddp=true
+```
+
+#### Multi-GPU Training Options
+```bash
+# DataParallel (single process, multiple GPUs)
+python train_model.py general.parallel.use_parallel=true general.parallel.device_ids=[0,1,2]
+
+# DistributedDataParallel (multiple processes, recommended)
+python train_model_ddp.py general.use_ddp=true model=mae_base
+
+# Single GPU (specify device)
+python train_model.py general.device_id=0
 ```
 
 ## Loss Functions
@@ -312,23 +328,39 @@ seed: 42
 
 ## Training Results and Output Locations
 
-The training system stores results in multiple locations for comprehensive tracking and analysis. Here's where to find all your training outputs:
+The training system stores results in multiple locations depending on the training method used:
 
-### 1. Hydra Output Directories (Primary Storage)
+### 1. Single GPU / DataParallel Training Output
 
 **Location Pattern**:
 ```
 ./working_env/singlerun/{model_name}/{YYYY-MM-DD}/{HH-MM-SS}/
 ```
 
-**Example**:
+### 2. DDP Training Output (New)
+
+**Location Pattern**:
+```
+./outputs/ddp_run_{YYYY-MM-DD}_{HH-MM-SS}/
+```
+
+**Single GPU Example**:
 ```
 ./working_env/singlerun/mae_medium/2025-08-23/14-30-45/
-├── metrics.csv              # CSV metrics log (NEW!)
+├── metrics.csv              # CSV metrics log
 ├── model_140.pth            # Model checkpoints (every 5 epochs)
 ├── model_200.pth
 ├── .hydra/                  # Hydra configuration snapshots
 └── train_model.log          # Training logs
+```
+
+**DDP Training Example**:
+```
+./outputs/ddp_run_2025-08-25_00-00-21/
+├── metrics.csv              # Aggregated metrics from all GPUs
+├── model_10.pth            # Model checkpoints (saved by rank 0 only)
+├── model_20.pth
+└── training.log            # Training logs
 ```
 
 **Contents**:
@@ -435,7 +467,18 @@ metrics_df = runs[['metrics.CustomLoss train', 'metrics.ReconstructionMSE train'
 - **Disease-specific plots**: RGB reconstructions per disease type
 - **Latent space visualizations**: Encoded representation plots
 
-### 5. External Results Directory (Optional)
+### 5. Key Differences: Single GPU vs DDP Output
+
+| Aspect | Single GPU/DataParallel | DDP Training |
+|--------|-------------------------|--------------|
+| **Output Location** | `./working_env/singlerun/` | `./outputs/ddp_run_*/` |
+| **MLflow Runs** | Single run | Single consolidated run (rank 0 only) |
+| **Model Saving** | All processes | Rank 0 only (no duplicates) |
+| **CSV Logging** | Standard location | Simplified timestamped directory |
+| **Process Count** | 1 process | 1 process per GPU |
+| **Metrics** | Direct | Aggregated across all GPUs |
+
+### 6. External Results Directory (Optional)
 
 **Location**: `F:/Neavus/results_hs/{YYYY-MM-DD}_{HH-MM-SS}/`
 - Only used when `general.save_results: true` in config
@@ -516,16 +559,24 @@ python train_model.py hparams.accumulate_grad_batches=4
    - Reduce batch size: `hparams.batch_size=2`
    - Enable gradient accumulation: `hparams.accumulate_grad_batches=4`
    - Use smaller model: `model=mae_small`
+   - Use DDP to distribute memory across GPUs: `train_model_ddp.py`
 
 2. **Slow Training**:
    - Increase number of workers: `general.num_workers=16`
-   - Use multiple GPUs: `train_model_ddp.py`
+   - Use DDP for multi-GPU: `python train_model_ddp.py general.use_ddp=true`
    - Enable mixed precision: `general.use_amp=true`
 
 3. **Configuration Errors**:
    - Validate config: `python train_model.py --cfg job`
    - Check paths in dataset configuration
    - Ensure MLflow tracking URI is accessible
+
+### DDP Training Tips
+- **Batch size**: Specify per-GPU batch size (e.g., `batch_size=6` means 6 per GPU)
+- **Effective batch size**: With 3 GPUs and `batch_size=6`, effective batch size is 18
+- **Memory usage**: Each GPU uses similar memory to single-GPU training
+- **Speed gain**: Expect ~2.5-2.8x speedup with 3 GPUs (due to communication overhead)
+- **Steps per epoch**: Will be ~1/3 of single-GPU (data split across GPUs)
 
 ### Debugging
 

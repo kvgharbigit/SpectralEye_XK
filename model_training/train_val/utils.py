@@ -24,10 +24,12 @@ EpochInfo = namedtuple(typename='EpochInfo', field_names=['epoch', 'nb_epochs', 
 
 class TrainingModule:
 
-    def __init__(self, model: nn.Module, optimizer: nn.Module, scheduler: nn.Module):
+    def __init__(self, model: nn.Module, optimizer: nn.Module, scheduler: nn.Module, use_amp: bool = False):
         self.model: nn.Module = model
         self.optimizer: nn.Module = optimizer
         self.scheduler: nn.Module = scheduler
+        self.use_amp = use_amp
+        self.scaler = torch.cuda.amp.GradScaler() if use_amp else None
 
     def zero_grad(self):
         if not self.model.training:
@@ -39,8 +41,13 @@ class TrainingModule:
         if not self.model.training:
             return
 
-        loss.backward()
-        self.optimizer.step()
+        if self.use_amp and self.scaler:
+            self.scaler.scale(loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+        else:
+            loss.backward()
+            self.optimizer.step()
 
 
 def print_overridden_parameters() -> str:
@@ -96,7 +103,8 @@ def create_training_module(cfg) -> TrainingModule:
         logger.info(f'\t No scheduler defined')
         scheduler = None
 
-    return TrainingModule(model, optimizer, scheduler)
+    use_amp = getattr(cfg.general, 'use_amp', False)
+    return TrainingModule(model, optimizer, scheduler, use_amp)
 
 
 

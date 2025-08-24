@@ -15,11 +15,13 @@ EpochInfo = namedtuple(typename='EpochInfo', field_names=['epoch', 'nb_epochs', 
 
 
 class TrainingModule:
-    def __init__(self, model, optimizer, scheduler, use_ddp=False):
+    def __init__(self, model, optimizer, scheduler, use_ddp=False, use_amp=False):
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.use_ddp = use_ddp
+        self.use_amp = use_amp
+        self.scaler = torch.cuda.amp.GradScaler() if use_amp else None
 
     def zero_grad(self):
         if not self.model.training:
@@ -30,8 +32,15 @@ class TrainingModule:
     def backward(self, loss):
         if not self.model.training:
             return
-        loss.backward()
-        self.optimizer.step()
+        
+        if self.use_amp and self.scaler:
+            self.scaler.scale(loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+        else:
+            loss.backward()
+            self.optimizer.step()
+        
         if self.use_ddp:
             torch.cuda.synchronize()
 
@@ -54,7 +63,8 @@ def create_training_module(cfg, use_ddp=False):
     model = get_model(cfg, use_ddp)
     optimizer = instantiate(cfg.optimizer)(model.parameters())
     scheduler = instantiate(cfg.scheduler, optimizer) if cfg.scheduler else None
-    return TrainingModule(model, optimizer, scheduler, use_ddp)
+    use_amp = getattr(cfg.general, 'use_amp', False)
+    return TrainingModule(model, optimizer, scheduler, use_ddp, use_amp)
 
 
 def get_datasets(cfg: DictConfig):

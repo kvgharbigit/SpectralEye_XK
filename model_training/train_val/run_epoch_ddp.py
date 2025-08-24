@@ -70,11 +70,12 @@ def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_pre
 
         train_module.zero_grad()
 
-        # Forward pass: assume model returns (loss_batch, pred, mask)
-        loss_batch, pred, mask = train_module.model(hs_cube)
-        loss = torch.mean(loss_batch)
+        # Forward pass with mixed precision
+        with torch.cuda.amp.autocast(enabled=train_module.use_amp):
+            loss_batch, pred, mask = train_module.model(hs_cube)
+            loss = torch.mean(loss_batch)
 
-        # Reconstruct output (handle both DDP and non-DDP models)
+        # Reconstruct output (handle both DDP and non-DDP models) - outside autocast for metrics
         if hasattr(train_module.model, 'module'):
             decoder = train_module.model.module.decoder
         else:

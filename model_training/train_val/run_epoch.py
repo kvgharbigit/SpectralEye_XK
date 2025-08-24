@@ -88,7 +88,7 @@ def run_one_epoch(epoch_info: EpochInfo, train_module: TrainingModule, loader, l
         train_module.zero_grad()  # Reset gradients
 
         # Forward pass with mixed precision
-        with torch.cuda.amp.autocast(enabled=getattr(train_module, 'use_amp', False)):
+        with torch.amp.autocast('cuda', enabled=getattr(train_module, 'use_amp', False)):
             loss_batch, pred, mask = train_module.model(hs_cube)
             loss = torch.mean(loss_batch)
 
@@ -112,12 +112,13 @@ def run_one_epoch(epoch_info: EpochInfo, train_module: TrainingModule, loader, l
 
         # Plot the prediction
         if show_predictions:
-            hs_cube = hs_cube.detach().cpu().numpy()
-            reconstructed_output = reconstructed_output.detach().cpu().numpy()
-            rgb = rgb.detach().cpu().numpy()
+            # Ensure float32 dtype for matplotlib compatibility with mixed precision
+            hs_cube_plot = hs_cube.detach().cpu().float().numpy()
+            reconstructed_output_plot = reconstructed_output.detach().cpu().float().numpy()
+            rgb_plot = rgb.detach().cpu().float().numpy()
 
             for plot_name, show_prediction in show_predictions.items():
-                fig = show_prediction(hs_cube, reconstructed_output, rgb, label)
+                fig = show_prediction(hs_cube_plot, reconstructed_output_plot, rgb_plot, label)
                 mlflow.log_figure(fig, artifact_file=f'{epoch_info.epoch:0>4}_{i:0>3}_{plot_name}.png')
                 plt.close(fig)
 

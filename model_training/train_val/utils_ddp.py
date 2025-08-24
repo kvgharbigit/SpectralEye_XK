@@ -21,7 +21,7 @@ class TrainingModule:
         self.scheduler = scheduler
         self.use_ddp = use_ddp
         self.use_amp = use_amp
-        self.scaler = torch.cuda.amp.GradScaler() if use_amp else None
+        self.scaler = torch.amp.GradScaler('cuda') if use_amp else None
 
     def zero_grad(self):
         if not self.model.training:
@@ -76,7 +76,8 @@ def get_datasets(cfg: DictConfig):
 def get_dataloaders(cfg, dataset, mode='train', use_ddp=False):
     batch_size = cfg.hparams.batch_size
     num_workers = cfg.dataloader.num_workers
-    pin_memory = cfg.dataloader.pin_memory
+    # Disable pin_memory in DDP mode to avoid Windows multiprocessing issues
+    pin_memory = cfg.dataloader.pin_memory and not use_ddp
     prefetch_factor = cfg.dataloader.prefetch_factor
     persistent_workers = cfg.dataloader.persistent_workers
 

@@ -29,7 +29,7 @@ class TrainingModule:
         self.optimizer: nn.Module = optimizer
         self.scheduler: nn.Module = scheduler
         self.use_amp = use_amp
-        self.scaler = torch.cuda.amp.GradScaler() if use_amp else None
+        self.scaler = torch.amp.GradScaler('cuda') if use_amp else None
 
     def zero_grad(self):
         if not self.model.training:

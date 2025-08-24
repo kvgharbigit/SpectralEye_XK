@@ -61,6 +61,7 @@ def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_pre
     nb_batch = len(loader)
 
     for i, batch in enumerate(loader, 1):
+        batch_start_time = perf_counter()
         hs_cube, label, rgb = batch
 
         # Move hs_cube to the proper device (instead of hardcoding "cuda")
@@ -71,7 +72,7 @@ def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_pre
         train_module.zero_grad()
 
         # Forward pass with mixed precision
-        with torch.cuda.amp.autocast(enabled=train_module.use_amp):
+        with torch.amp.autocast('cuda', enabled=train_module.use_amp):
             loss_batch, pred, mask = train_module.model(hs_cube)
             loss = torch.mean(loss_batch)
 
@@ -97,21 +98,33 @@ def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_pre
 
         # Logging Figures to MLflow (only rank 0, move tensors to CPU for plotting)
         if show_predictions and rank == 0:
-            hs_cube_cpu = hs_cube.detach().cpu().numpy()
-            reconstructed_output_cpu = reconstructed_output.detach().cpu().numpy()
-            rgb_cpu = rgb.detach().cpu().numpy()
+            # Ensure float32 dtype for matplotlib compatibility
+            hs_cube_cpu = hs_cube.detach().cpu().float().numpy()
+            reconstructed_output_cpu = reconstructed_output.detach().cpu().float().numpy()
+            rgb_cpu = rgb.detach().cpu().float().numpy()
 
             for plot_name, show_prediction in show_predictions.items():
                 fig = show_prediction(hs_cube_cpu, reconstructed_output_cpu, rgb_cpu, label)
                 mlflow.log_figure(fig, artifact_file=f'{epoch_info.epoch:04}_{i:03}_{plot_name}.png')
                 plt.close(fig)
 
-        # Update Progress Bar
+        # Update Progress Bar with timing
         cuda_memory = f"{torch.cuda.memory_allocated(device) / 1024 ** 3:.2f} GB"
         cuda_cached = f"{torch.cuda.memory_reserved(device) / 1024 ** 3:.2f} GB"
+        
+        # Calculate timing
+        batch_time = perf_counter() - batch_start_time
+        elapsed_time = perf_counter() - t_start_epoch
+        avg_batch_time = elapsed_time / i
+        eta_seconds = avg_batch_time * (nb_batch - i)
+        
+        # Format time displays
+        elapsed_str = seconds_to_string(elapsed_time)
+        eta_str = seconds_to_string(eta_seconds)
+        
         progress_bar(
             i - 1, nb_batch,
-            msg=f'[{i}/{nb_batch}] Loss: {loss.item():.3e}, Acc: {metric:.2e}, cuda_mem: {cuda_memory}, cached={cuda_cached}',
+            msg=f'[{i}/{nb_batch}] Loss: {loss.item():.3e}, Acc: {metric:.2e}, cuda_mem: {cuda_memory}, cached={cuda_cached}, elapsed: {elapsed_str}, ETA: {eta_str}',
             colored=False
         )
 

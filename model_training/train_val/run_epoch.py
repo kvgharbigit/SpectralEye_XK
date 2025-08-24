@@ -76,6 +76,7 @@ def run_one_epoch(epoch_info: EpochInfo, train_module: TrainingModule, loader, l
     device = next(train_module.model.parameters()).device
 
     for i, batch in enumerate(loader, 1):
+        batch_start_time = perf_counter()
 
         hs_cube, label, rgb = batch
         hs_cube = hs_cube.to(device, non_blocking=True)
@@ -126,8 +127,18 @@ def run_one_epoch(epoch_info: EpochInfo, train_module: TrainingModule, loader, l
             cuda_memory = "N/A"
             cuda_cached = "N/A"
 
+        # Calculate time metrics
+        batch_time = perf_counter() - batch_start_time
+        elapsed_time = perf_counter() - t_start_epoch
+        avg_batch_time = elapsed_time / i
+        eta_seconds = avg_batch_time * (nb_batch - i)
+        
+        # Format time displays
+        elapsed_str = seconds_to_string(elapsed_time)
+        eta_str = seconds_to_string(eta_seconds)
+
         # Update progress bar
-        progress_bar(i - 1, nb_batch, msg=f'[{i}/{nb_batch}] Loss: {loss.item():.3e}, Acc: {metric:.2e}, cuda_memory: {cuda_memory}, cuda_cached={cuda_cached}', colored=False)
+        progress_bar(i - 1, nb_batch, msg=f'[{i}/{nb_batch}] Loss: {loss.item():.3e}, Acc: {metric:.2e}, cuda_memory: {cuda_memory}, cuda_cached={cuda_cached}, elapsed: {elapsed_str}, ETA: {eta_str}', colored=False)
 
     # Clear the progress bar
     print('\r', end='')

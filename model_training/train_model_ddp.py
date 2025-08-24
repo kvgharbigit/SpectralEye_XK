@@ -53,12 +53,17 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
         os.environ["USE_LIBUV"] = "0"
         os.environ["GLOO_SOCKET_IFNAME"] = ""
         
-        # Use TCP store directly
+        # Use TCP store directly with correct parameters
         from torch.distributed import TCPStore
+        import datetime
+        timeout = datetime.timedelta(seconds=300)
+        
         if rank == 0:
-            store = TCPStore("127.0.0.1", 29500, world_size, True, None)
+            store = TCPStore("127.0.0.1", 29500, world_size=world_size, is_master=True, 
+                           timeout=timeout, wait_for_workers=True, use_libuv=False)
         else:
-            store = TCPStore("127.0.0.1", 29500, world_size, False, None)
+            store = TCPStore("127.0.0.1", 29500, world_size=world_size, is_master=False, 
+                           timeout=timeout, wait_for_workers=True, use_libuv=False)
         
         dist.init_process_group(
             backend="gloo",

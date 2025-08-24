@@ -50,7 +50,7 @@ def log_metrics_to_csv(metrics: dict[str, float], current_step: int, csv_path: s
         
         writer.writerow(row_data)
 
-def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_predictions, device, csv_path: str = None):
+def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_predictions, device, csv_path: str = None, rank: int = 0):
     """Train or validate for one epoch using the specified device."""
     t_start_epoch = perf_counter()
     mode = 'train' if train_module.model.training else 'val'
@@ -89,8 +89,8 @@ def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_pre
         epoch_metric += metric * hs_cube.size(0)
         total_samples += hs_cube.size(0)
 
-        # Logging Figures to MLflow (move tensors to CPU for plotting)
-        if show_predictions:
+        # Logging Figures to MLflow (only rank 0, move tensors to CPU for plotting)
+        if show_predictions and rank == 0:
             hs_cube_cpu = hs_cube.detach().cpu().numpy()
             reconstructed_output_cpu = reconstructed_output.detach().cpu().numpy()
             rgb_cpu = rgb.detach().cpu().numpy()
@@ -114,24 +114,33 @@ def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_pre
     # Final Calculation
     epoch_loss = epoch_loss / total_samples
     epoch_metric = epoch_metric / total_samples
+    
+    # Aggregate metrics across all GPUs if using DDP
+    if torch.distributed.is_initialized():
+        metrics_tensor = torch.tensor([epoch_loss, epoch_metric], device=device)
+        torch.distributed.all_reduce(metrics_tensor, op=torch.distributed.ReduceOp.SUM)
+        epoch_loss = metrics_tensor[0].item() / torch.distributed.get_world_size()
+        epoch_metric = metrics_tensor[1].item() / torch.distributed.get_world_size()
 
-    # Log to MLflow
-    log_values = {
-        f'{loss_fn.__class__.__name__} {mode}': round(epoch_loss, 5),
-        f'{metric_fn.__class__.__name__} {mode}': round(epoch_metric, 5),
-    }
-    if mode == 'train':
-        log_values['Learning Rate'] = train_module.optimizer.param_groups[0]['lr']
-    log_metrics(log_values, epoch_info.epoch, csv_path)
+    # Log to MLflow (only rank 0 logs after aggregation)
+    if rank == 0:
+        log_values = {
+            f'{loss_fn.__class__.__name__} {mode}': round(epoch_loss, 5),
+            f'{metric_fn.__class__.__name__} {mode}': round(epoch_metric, 5),
+        }
+        if mode == 'train':
+            log_values['Learning Rate'] = train_module.optimizer.param_groups[0]['lr']
+        log_metrics(log_values, epoch_info.epoch, csv_path)
 
     elapsed_time = seconds_to_string(perf_counter() - t_start_epoch)
 
-    # Logging final results
-    if mode == 'train':
-        prefix = f'[{epoch_info.epoch}/{epoch_info.nb_epochs}] TRAIN -'
-    else:
-        spaces = ' ' * len(f'[{epoch_info.epoch}/{epoch_info.nb_epochs}]')
-        prefix = f'{spaces} VALID -'
-    logger.info(f'{prefix} Loss: {epoch_loss:.3e}, Acc: {epoch_metric:.3f} ({elapsed_time})')
+    # Logging final results (only rank 0 logs after aggregation)
+    if rank == 0:
+        if mode == 'train':
+            prefix = f'[{epoch_info.epoch}/{epoch_info.nb_epochs}] TRAIN -'
+        else:
+            spaces = ' ' * len(f'[{epoch_info.epoch}/{epoch_info.nb_epochs}]')
+            prefix = f'{spaces} VALID -'
+        logger.info(f'{prefix} Loss: {epoch_loss:.3e}, Acc: {epoch_metric:.3f} ({elapsed_time})')
 
     return epoch_loss, epoch_metric

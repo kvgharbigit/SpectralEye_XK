@@ -26,7 +26,7 @@ from hydra.core.hydra_config import HydraConfig
 
 # Import your custom modules.
 # Adjust the import paths based on your project structure.
-from train_val.run_epoch import run_one_epoch
+from train_val.run_epoch_ddp import run_one_epoch
 from train_val.utils import create_training_module, get_datasets, get_dataloaders, EpochInfo
 from utils.save_model import save_model
 from hydra.core.hydra_config import HydraConfig
@@ -67,8 +67,8 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
 
     # Load dataset and dataloaders
     dataset = get_datasets(cfg)
-    dl_train = get_dataloaders(cfg, dataset[0], mode="train")
-    dl_val   = get_dataloaders(cfg, dataset[1], mode="val")
+    dl_train = get_dataloaders(cfg, dataset[0], mode="train", use_ddp=cfg.general.use_ddp)
+    dl_val   = get_dataloaders(cfg, dataset[1], mode="val", use_ddp=cfg.general.use_ddp)
 
     # Create the training module (this should include the model, optimizer, scheduler, etc.)
     train_module = create_training_module(cfg)
@@ -124,52 +124,65 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
         
         update_experiment_mapping()
 
-    # Start an mlflow run
-    with mlflow.start_run(experiment_id=my_experiment.experiment_id, run_name=run_name):
+    # Start an mlflow run (only on rank 0 to avoid duplicate runs)
+    if rank == 0:
+        mlflow_run = mlflow.start_run(experiment_id=my_experiment.experiment_id, run_name=run_name)
         # (Optionally log the entire config or specific parameters)
         mlflow.log_params(OmegaConf.to_container(cfg, resolve=True))
+    else:
+        mlflow_run = None
         
-        # --- Setup CSV logging (only for main process) ---
-        csv_path = None
-        if rank == 0:  # Only main process creates CSV
-            hydra_config = HydraConfig.get()
-            csv_path = f"{hydra_config.runtime.output_dir}/metrics.csv"
-            logger.info(f"[Rank {rank}] Metrics will be saved to: {csv_path}")
+    # --- Setup CSV logging (only for main process) ---
+    csv_path = None
+    if rank == 0:  # Only main process creates CSV
+        hydra_config = HydraConfig.get()
+        csv_path = f"{hydra_config.runtime.output_dir}/metrics.csv"
+        logger.info(f"[Rank {rank}] Metrics will be saved to: {csv_path}")
 
-        nb_epochs = cfg.hparams.nb_epochs
-        loss_fn = torch.nn.MSELoss().to(device)
-        metric_fn = torch.nn.L1Loss().to(device)
+    nb_epochs = cfg.hparams.nb_epochs
+    loss_fn = torch.nn.MSELoss().to(device)
+    metric_fn = torch.nn.L1Loss().to(device)
 
-        # Main training loop
-        for epoch in range(1, nb_epochs + 1):
-            epoch_info = EpochInfo(epoch, nb_epochs, cfg.hparams.batch_size * epoch)
+    # Main training loop
+    for epoch in range(1, nb_epochs + 1):
+        epoch_info = EpochInfo(epoch, nb_epochs, cfg.hparams.batch_size * epoch)
 
-            # Training epoch
-            train_module.model.train()
-            loss, acc = run_one_epoch(epoch_info, train_module, dl_train, loss_fn, metric_fn, show_predictions, device, csv_path)
-            logger.info(f"[Rank {rank}] Epoch {epoch} TRAIN: Loss={loss:.4f}, Metric={acc:.4f}")
+        # Training epoch
+        train_module.model.train()
+        loss, acc = run_one_epoch(epoch_info, train_module, dl_train, loss_fn, metric_fn, show_predictions, device, csv_path, rank)
+        if rank == 0:
+            logger.info(f"Epoch {epoch} TRAIN: Loss={loss:.4f}, Metric={acc:.4f}")
 
-            # Validation epoch (if needed)
-            if epoch % cfg.hparams.valid_interval == 0:
-                train_module.model.eval()
-                with torch.no_grad():
-                    val_loss, val_acc = run_one_epoch(epoch_info, train_module, dl_val, loss_fn, metric_fn, show_predictions, device, csv_path)
-                logger.info(f"[Rank {rank}] Epoch {epoch} VAL: Loss={val_loss:.4f}, Metric={val_acc:.4f}")
+        # Validation epoch (if needed)
+        if epoch % cfg.hparams.valid_interval == 0:
+            train_module.model.eval()
+            with torch.no_grad():
+                val_loss, val_acc = run_one_epoch(epoch_info, train_module, dl_val, loss_fn, metric_fn, show_predictions, device, csv_path, rank)
+            if rank == 0:
+                logger.info(f"Epoch {epoch} VAL: Loss={val_loss:.4f}, Metric={val_acc:.4f}")
 
-            # (Optional) Step the scheduler
-            if hasattr(train_module, "scheduler") and train_module.scheduler:
-                train_module.scheduler.step(loss)
+        # (Optional) Step the scheduler
+        if hasattr(train_module, "scheduler") and train_module.scheduler:
+            train_module.scheduler.step(loss)
 
-            # (Optional) Save the model checkpoint at intervals
-            if epoch % cfg.hparams.valid_interval == 0 and cfg.general.save_model:
-                output_dir = HydraConfig.get().runtime.output_dir
-                model_path = f"{output_dir}/model_{epoch}.pth"
-                save_model(train_module.model, model_path, cfg.general.parallel.use_parallel)
-                logger.info(f"[Rank {rank}] Saved model checkpoint: {model_path}")
-
-        # Clean up distributed processes if using DDP
+        # (Optional) Save the model checkpoint at intervals (only rank 0)
+        if epoch % cfg.hparams.valid_interval == 0 and cfg.general.save_model and rank == 0:
+            output_dir = HydraConfig.get().runtime.output_dir
+            model_path = f"{output_dir}/model_{epoch}.pth"
+            save_model(train_module.model, model_path, cfg.general.use_ddp or cfg.general.parallel.use_parallel)
+            logger.info(f"Saved model checkpoint: {model_path}")
+        
+        # Synchronize all processes at the end of each epoch
         if cfg.general.use_ddp:
-            torch.distributed.destroy_process_group()
+            dist.barrier()
+
+    # End MLflow run if we started one
+    if rank == 0 and mlflow_run:
+        mlflow.end_run()
+    
+    # Clean up distributed processes if using DDP
+    if cfg.general.use_ddp:
+        torch.distributed.destroy_process_group()
 
 
 @hydra.main(version_base="1.3", config_path="conf", config_name="config")

@@ -187,6 +187,10 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
             save_model(train_module.model, model_path, cfg.general.use_ddp or cfg.general.parallel.use_parallel)
             logger.info(f"Saved model checkpoint: {model_path}")
         
+        # Clean up memory before synchronization
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+        
         # Synchronize all processes at the end of each epoch
         if cfg.general.use_ddp:
             dist.barrier()

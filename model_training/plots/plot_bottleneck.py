@@ -143,7 +143,12 @@ def display_rgb(hs_cubes, reconstructed_outputs, rgb_images, labels, nb_to_plot=
     gs = GridSpec(nb_to_plot, 4, figure=fig, wspace=0.3, hspace=0.3)  # GridSpec for layout
     mse = nn.MSELoss(reduction='none')
 
-    mse_spectra = mse(torch.tensor(reconstructed_outputs), torch.tensor(hs_cubes)).mean(dim=(2, 3)).cpu().detach().numpy()
+    # Avoid creating new tensors - compute MSE directly on numpy arrays or use existing tensors
+    if isinstance(reconstructed_outputs, np.ndarray) and isinstance(hs_cubes, np.ndarray):
+        mse_spectra = np.mean((reconstructed_outputs - hs_cubes) ** 2, axis=(2, 3))
+    else:
+        # If they're already tensors, use them directly
+        mse_spectra = mse(reconstructed_outputs, hs_cubes).mean(dim=(2, 3)).cpu().detach().numpy()
 
     input_spectra = hs_cubes.mean(axis=(2, 3))
     output_spectra = reconstructed_outputs.mean(axis=(2, 3))

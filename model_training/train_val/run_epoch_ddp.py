@@ -107,6 +107,9 @@ def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_pre
                 fig = show_prediction(hs_cube_cpu, reconstructed_output_cpu, rgb_cpu, label)
                 mlflow.log_figure(fig, artifact_file=f'{epoch_info.epoch:04}_{i:03}_{plot_name}.png')
                 plt.close(fig)
+            
+            # Clean up large CPU arrays to free memory
+            del hs_cube_cpu, reconstructed_output_cpu, rgb_cpu
 
         # Update Progress Bar with timing
         cuda_memory = f"{torch.cuda.memory_allocated(device) / 1024 ** 3:.2f} GB"

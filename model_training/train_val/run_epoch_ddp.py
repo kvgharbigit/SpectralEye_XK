@@ -14,15 +14,17 @@ from model_training.utils.preprocess_hsi import preprocess_hsi
 
 logger = logging.getLogger()
 
-def log_metrics(metrics: dict[str, float], current_step: int, csv_path: str = None) -> None:
-    """ Log the metrics in mlflow and CSV. """
+def log_metrics(metrics: dict[str, float], current_step: int, csv_path: str = None, rank: int = 0) -> None:
+    """ Log the metrics in mlflow and CSV. Only rank 0 should call this. """
 
-    for key, value in metrics.items():
-        mlflow.log_metric(key=f"{key}", value=value, step=current_step)
-    
-    # Log to CSV if path provided
-    if csv_path:
-        log_metrics_to_csv(metrics, current_step, csv_path)
+    # Only rank 0 logs to avoid conflicts
+    if rank == 0:
+        for key, value in metrics.items():
+            mlflow.log_metric(key=f"{key}", value=value, step=current_step)
+        
+        # Log to CSV if path provided
+        if csv_path:
+            log_metrics_to_csv(metrics, current_step, csv_path)
 
 
 def log_metrics_to_csv(metrics: dict[str, float], current_step: int, csv_path: str) -> None:
@@ -40,15 +42,18 @@ def log_metrics_to_csv(metrics: dict[str, float], current_step: int, csv_path: s
     if csv_dir:  # Only create if there's a directory path
         os.makedirs(csv_dir, exist_ok=True)
     
-    # Write to CSV
-    with open(csv_path, 'a', newline='') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=row_data.keys())
-        
-        # Write header if file is new
-        if not file_exists:
-            writer.writeheader()
-        
-        writer.writerow(row_data)
+    # Write to CSV with error handling
+    try:
+        with open(csv_path, 'a', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=row_data.keys())
+            
+            # Write header if file is new
+            if not file_exists:
+                writer.writeheader()
+            
+            writer.writerow(row_data)
+    except Exception as e:
+        logger.error(f"Failed to write metrics to CSV {csv_path}: {e}")
 
 def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_predictions, device, csv_path: str = None, rank: int = 0):
     """Train or validate for one epoch using the specified device."""
@@ -152,9 +157,7 @@ def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_pre
         }
         if mode == 'train':
             log_values['Learning Rate'] = train_module.optimizer.param_groups[0]['lr']
-        # Only rank 0 logs metrics to avoid conflicts
-        if rank == 0:
-            log_metrics(log_values, epoch_info.epoch, csv_path)
+        log_metrics(log_values, epoch_info.epoch, csv_path, rank)
 
     elapsed_time = seconds_to_string(perf_counter() - t_start_epoch)
 

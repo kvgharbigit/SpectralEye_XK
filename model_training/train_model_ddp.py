@@ -95,9 +95,14 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
         show_predictions = None
 
     # Set up mlflow experiment and run name (custom resolvers like ${now:...} work now)
-    my_experiment = mlflow.set_experiment(cfg.mlflow.experiment_name)
-    run_name = cfg.mlflow.run_name
-    logger.info(f"[Rank {rank}] Starting experiment: {run_name}")
+    # Only rank 0 creates/sets the experiment to avoid race conditions
+    if rank == 0:
+        my_experiment = mlflow.set_experiment(cfg.mlflow.experiment_name)
+        run_name = cfg.mlflow.run_name
+        logger.info(f"[Rank {rank}] Starting experiment: {run_name}")
+    else:
+        my_experiment = None
+        run_name = None
     
     # --- Create experiment mapping for easy identification ---
     if rank == 0:  # Only main process updates mapping
@@ -141,6 +146,7 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
         
     # --- Setup CSV logging (only for main process) ---
     csv_path = None
+    output_dir = None
     if rank == 0:  # Only main process creates CSV
         # Create a simple output directory since HydraConfig isn't available in spawned processes
         from datetime import datetime
@@ -178,14 +184,11 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
 
         # (Optional) Save the model checkpoint at intervals (only rank 0)
         if epoch % cfg.hparams.valid_interval == 0 and cfg.general.save_model and rank == 0:
-            # Use the same output directory as CSV (reuse timestamp from earlier)
-            from datetime import datetime
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            output_dir = f"model_training/working_env/ddp_runs/ddp_run_{timestamp}"
-            os.makedirs(output_dir, exist_ok=True)
-            model_path = f"{output_dir}/model_{epoch}.pth"
-            save_model(train_module.model, model_path, cfg.general.use_ddp or cfg.general.parallel.use_parallel)
-            logger.info(f"Saved model checkpoint: {model_path}")
+            # Use the same output directory as CSV
+            if output_dir:
+                model_path = f"{output_dir}/model_{epoch}.pth"
+                save_model(train_module.model, model_path, cfg.general.use_ddp or cfg.general.parallel.use_parallel)
+                logger.info(f"Saved model checkpoint: {model_path}")
         
         # Clean up memory before synchronization
         if device.type == "cuda":

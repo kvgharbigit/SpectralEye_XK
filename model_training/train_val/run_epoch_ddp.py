@@ -10,7 +10,7 @@ import csv
 import os
 import pandas as pd
 from datetime import datetime
-from utils.preprocess_hsi import preprocess_hsi
+from model_training.utils.preprocess_hsi import preprocess_hsi
 
 logger = logging.getLogger()
 

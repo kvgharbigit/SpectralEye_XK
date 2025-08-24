@@ -49,15 +49,22 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
 
     # Initialize DDP if enabled
     if cfg.general.use_ddp:
-        # Set environment variables for each process
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "12355"
-        os.environ["RANK"] = str(rank)
-        os.environ["WORLD_SIZE"] = str(world_size)
+        # Force disable libuv for Windows compatibility
+        os.environ["USE_LIBUV"] = "0"
+        os.environ["GLOO_SOCKET_IFNAME"] = ""
+        
+        # Use TCP store directly
+        from torch.distributed import TCPStore
+        if rank == 0:
+            store = TCPStore("127.0.0.1", 29500, world_size, True, None)
+        else:
+            store = TCPStore("127.0.0.1", 29500, world_size, False, None)
         
         dist.init_process_group(
             backend="gloo",
-            init_method="env://"
+            store=store,
+            rank=rank,
+            world_size=world_size
         )
 
     # Load dataset and dataloaders

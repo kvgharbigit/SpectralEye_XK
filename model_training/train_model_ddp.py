@@ -131,7 +131,6 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
     csv_path = None
     if rank == 0:  # Only main process creates CSV
         # Create a simple output directory since HydraConfig isn't available in spawned processes
-        import os
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         output_dir = f"outputs/ddp_run_{timestamp}"
@@ -167,8 +166,7 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
 
         # (Optional) Save the model checkpoint at intervals (only rank 0)
         if epoch % cfg.hparams.valid_interval == 0 and cfg.general.save_model and rank == 0:
-            # Use the same output directory as CSV
-            import os
+            # Use the same output directory as CSV (reuse timestamp from earlier)
             from datetime import datetime
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             output_dir = f"outputs/ddp_run_{timestamp}"

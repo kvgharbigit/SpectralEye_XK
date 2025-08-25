@@ -283,7 +283,7 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
                         "optimizer": getattr(cfg.optimizer, '_target_', 'unknown').split('.')[-1],
                         "loss": getattr(cfg.loss, '_target_', 'unknown').split('.')[-1],
                         "use_ddp": cfg.general.use_ddp,
-                        "device_ids": getattr(cfg.general.parallel, 'device_ids', [cfg.general.device_id])
+                        "device_ids": list(getattr(cfg.general.parallel, 'device_ids', [cfg.general.device_id]))
                     }
                 }
                 

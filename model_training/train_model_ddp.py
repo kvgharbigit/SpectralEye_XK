@@ -43,7 +43,6 @@ logger = logging.getLogger(__name__)
 def generate_training_plots(csv_path: str, output_dir: str) -> None:
     """Generate training plots from CSV metrics data"""
     import time
-    import fcntl
     
     try:
         # Add a small delay to ensure CSV write is complete
@@ -204,22 +203,28 @@ def create_model_info_file(output_dir: str, cfg: DictConfig, model, train_module
         f.write(f"Model size (MB): {total_params * 4 / 1024 / 1024:.2f}\n\n")
         
         # Model specific config
-        if hasattr(cfg.model, 'img_size'):
-            f.write("Model Configuration:\n")
-            for key, value in cfg.model.items():
-                if key != '_target_' and key != 'name':
-                    f.write(f"  {key}: {value}\n")
-            f.write("\n")
+        try:
+            if hasattr(cfg.model, 'img_size'):
+                f.write("Model Configuration:\n")
+                for key, value in cfg.model.items():
+                    if key != '_target_' and key != 'name':
+                        f.write(f"  {key}: {value}\n")
+                f.write("\n")
+        except Exception as e:
+            f.write(f"Model config (could not parse): {cfg.model}\n\n")
         
         # Training Configuration
         f.write("TRAINING CONFIGURATION\n")
         f.write("-" * 40 + "\n")
-        f.write(f"Epochs: {cfg.hparams.nb_epochs}\n")
-        f.write(f"Batch size: {cfg.hparams.batch_size}\n")
-        f.write(f"Learning rate: {cfg.hparams.lr}\n")
-        f.write(f"Validation interval: {cfg.hparams.valid_interval}\n")
-        if hasattr(cfg.hparams, 'accumulate_grad_batches'):
-            f.write(f"Gradient accumulation: {cfg.hparams.accumulate_grad_batches}\n")
+        try:
+            f.write(f"Epochs: {cfg.hparams.nb_epochs}\n")
+            f.write(f"Batch size: {cfg.hparams.batch_size}\n")
+            f.write(f"Learning rate: {cfg.hparams.lr}\n")
+            f.write(f"Validation interval: {cfg.hparams.valid_interval}\n")
+            if hasattr(cfg.hparams, 'accumulate_grad_batches'):
+                f.write(f"Gradient accumulation: {cfg.hparams.accumulate_grad_batches}\n")
+        except Exception as e:
+            f.write(f"Training config (could not parse): {cfg.hparams}\n")
         f.write("\n")
         
         # Optimizer

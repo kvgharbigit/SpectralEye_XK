@@ -321,6 +321,49 @@ def create_model_info_file(output_dir: str, cfg: DictConfig, model, train_module
     logger.info(f"Created model info file: {info_path}")
 
 
+def copy_small_files_to_network(local_dir: str, run_name: str, rank: int = 0) -> None:
+    """Copy small files to network drive (only rank 0 should call this)"""
+    if rank != 0:
+        return
+        
+    import shutil
+    try:
+        network_base = r"Z:\Projects\Ophthalmic neuroscience\Projects\Kayvan\SpectralEye_XK_Outputs"
+        network_dir = os.path.join(network_base, run_name)
+        
+        # Create network directory
+        os.makedirs(network_dir, exist_ok=True)
+        
+        # Files to copy (small files only)
+        small_files = [
+            "metrics.csv",
+            "model_info.txt", 
+            "training_summary.txt",
+            "training_curves.png"
+        ]
+        
+        for filename in small_files:
+            local_file = os.path.join(local_dir, filename)
+            if os.path.exists(local_file):
+                network_file = os.path.join(network_dir, filename)
+                shutil.copy2(local_file, network_file)
+                logger.debug(f"Copied {filename} to network drive")
+        
+        # Copy experiment info if it exists
+        exp_info_pattern = os.path.join(local_dir, "*experiment_info.json")
+        import glob
+        for exp_file in glob.glob(exp_info_pattern):
+            filename = os.path.basename(exp_file)
+            network_file = os.path.join(network_dir, filename)
+            shutil.copy2(exp_file, network_file)
+            logger.debug(f"Copied {filename} to network drive")
+            
+        logger.info(f"Small files copied to network drive: {network_dir}")
+        
+    except Exception as e:
+        logger.warning(f"Failed to copy files to network drive: {e}")
+
+
 def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
     """
     Training function to be run in each process.
@@ -542,6 +585,9 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
             # Update plots every 5 epochs or at validation intervals
             if epoch % 5 == 0 or epoch % cfg.hparams.valid_interval == 0:
                 generate_training_plots(csv_path, output_dir)
+                # Copy small files to network drive (non-blocking)
+                run_name = os.path.basename(output_dir)
+                copy_small_files_to_network(output_dir, run_name, rank)
         
         # Clean up memory before synchronization
         if device.type == "cuda":
@@ -555,6 +601,9 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
     if rank == 0 and csv_path and output_dir and os.path.exists(csv_path):
         logger.info("Generating final training plots...")
         generate_training_plots(csv_path, output_dir)
+        # Final copy to network drive
+        run_name = os.path.basename(output_dir)
+        copy_small_files_to_network(output_dir, run_name, rank)
     
     # End MLflow run if we started one
     if rank == 0 and mlflow_run:

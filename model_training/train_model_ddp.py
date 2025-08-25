@@ -72,16 +72,25 @@ def generate_training_plots(csv_path: str, output_dir: str) -> None:
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
         
         # Plot 1: Training and Validation Loss
+        # Debug: print column names to understand structure
+        logger.debug(f"CSV columns: {list(df.columns)}")
+        
         # Find loss columns (could be CustomLoss, MSELoss, etc.)
-        train_loss_cols = [col for col in df.columns if 'Loss train' in col and 'ReconstructionMSE' not in col]
-        val_loss_cols = [col for col in df.columns if 'Loss val' in col and 'ReconstructionMSE' not in col]
+        train_loss_cols = [col for col in df.columns if 'Loss train' in col or (col.endswith(' train') and 'Loss' in col)]
+        val_loss_cols = [col for col in df.columns if 'Loss val' in col or (col.endswith(' val') and 'Loss' in col)]
+        
+        logger.debug(f"Train loss columns found: {train_loss_cols}")
+        logger.debug(f"Val loss columns found: {val_loss_cols}")
         
         if train_loss_cols:
             ax1.plot(df['step'], df[train_loss_cols[0]], label='Train Loss', linewidth=2)
         if val_loss_cols:
             val_df = df[df[val_loss_cols[0]].notna()]
-            ax1.plot(val_df['step'], val_df[val_loss_cols[0]], label='Val Loss', 
-                    marker='o', markersize=6, linewidth=2)
+            if len(val_df) > 0:
+                ax1.plot(val_df['step'], val_df[val_loss_cols[0]], label='Val Loss', 
+                        marker='o', markersize=6, linewidth=2)
+            else:
+                logger.debug("No validation data found in CSV")
         ax1.set_xlabel('Epoch')
         ax1.set_ylabel('Loss')
         ax1.set_title('Training and Validation Loss')
@@ -90,15 +99,21 @@ def generate_training_plots(csv_path: str, output_dir: str) -> None:
         
         # Plot 2: Reconstruction MSE or Metric
         # Find metric columns (could be ReconstructionMSE, L1Loss, etc.)
-        train_metric_cols = [col for col in df.columns if col.endswith(' train') and 'Loss train' not in col and 'Learning Rate' not in col]
+        train_metric_cols = [col for col in df.columns if col.endswith(' train') and not any(x in col for x in ['Loss train', 'Learning Rate'])]
         val_metric_cols = [col for col in df.columns if col.endswith(' val') and 'Loss val' not in col]
+        
+        logger.debug(f"Train metric columns found: {train_metric_cols}")
+        logger.debug(f"Val metric columns found: {val_metric_cols}")
         
         if train_metric_cols:
             ax2.plot(df['step'], df[train_metric_cols[0]], label=f'Train {train_metric_cols[0].replace(" train", "")}', linewidth=2)
         if val_metric_cols:
             val_df = df[df[val_metric_cols[0]].notna()]
-            ax2.plot(val_df['step'], val_df[val_metric_cols[0]], label=f'Val {val_metric_cols[0].replace(" val", "")}', 
-                    marker='o', markersize=6, linewidth=2)
+            if len(val_df) > 0:
+                ax2.plot(val_df['step'], val_df[val_metric_cols[0]], label=f'Val {val_metric_cols[0].replace(" val", "")}', 
+                        marker='o', markersize=6, linewidth=2)
+            else:
+                logger.debug("No validation metric data found in CSV")
         ax2.set_xlabel('Epoch')
         ax2.set_ylabel('MSE')
         ax2.set_title('Reconstruction MSE')
@@ -127,15 +142,30 @@ def generate_training_plots(csv_path: str, output_dir: str) -> None:
             ax4.grid(True, alpha=0.3)
         else:
             # If no loss components, show train vs val gap
-            if 'CustomLoss train' in df.columns and 'CustomLoss val' in df.columns:
-                val_df = df[df['CustomLoss val'].notna()]
-                gap = val_df['CustomLoss val'] - val_df['CustomLoss train']
-                ax4.plot(val_df['step'], gap, color='red', linewidth=2)
-                ax4.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-                ax4.set_xlabel('Epoch')
-                ax4.set_ylabel('Val Loss - Train Loss')
+            if train_loss_cols and val_loss_cols:
+                train_col = train_loss_cols[0]
+                val_col = val_loss_cols[0]
+                # Get validation epochs only
+                val_df = df[df[val_col].notna()].copy()
+                if len(val_df) > 0:
+                    # Calculate gap for validation epochs only
+                    gap = val_df[val_col] - val_df[train_col]
+                    ax4.plot(val_df['step'], gap, color='red', linewidth=2)
+                    ax4.axhline(y=0, color='black', linestyle='--', alpha=0.5)
+                    ax4.set_xlabel('Epoch')
+                    ax4.set_ylabel('Val Loss - Train Loss')
+                    ax4.set_title('Generalization Gap')
+                    ax4.grid(True, alpha=0.3)
+                else:
+                    ax4.text(0.5, 0.5, 'No validation data available', 
+                           horizontalalignment='center', verticalalignment='center', 
+                           transform=ax4.transAxes)
+                    ax4.set_title('Generalization Gap')
+            else:
+                ax4.text(0.5, 0.5, 'Insufficient data for gap calculation', 
+                       horizontalalignment='center', verticalalignment='center', 
+                       transform=ax4.transAxes)
                 ax4.set_title('Generalization Gap')
-                ax4.grid(True, alpha=0.3)
         
         plt.tight_layout()
         

@@ -51,11 +51,15 @@ def generate_training_plots(csv_path: str, output_dir: str) -> None:
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
         
         # Plot 1: Training and Validation Loss
-        if 'CustomLoss train' in df.columns:
-            ax1.plot(df['step'], df['CustomLoss train'], label='Train Loss', linewidth=2)
-        if 'CustomLoss val' in df.columns:
-            val_df = df[df['CustomLoss val'].notna()]
-            ax1.plot(val_df['step'], val_df['CustomLoss val'], label='Val Loss', 
+        # Find loss columns (could be CustomLoss, MSELoss, etc.)
+        train_loss_cols = [col for col in df.columns if 'Loss train' in col and 'ReconstructionMSE' not in col]
+        val_loss_cols = [col for col in df.columns if 'Loss val' in col and 'ReconstructionMSE' not in col]
+        
+        if train_loss_cols:
+            ax1.plot(df['step'], df[train_loss_cols[0]], label='Train Loss', linewidth=2)
+        if val_loss_cols:
+            val_df = df[df[val_loss_cols[0]].notna()]
+            ax1.plot(val_df['step'], val_df[val_loss_cols[0]], label='Val Loss', 
                     marker='o', markersize=6, linewidth=2)
         ax1.set_xlabel('Epoch')
         ax1.set_ylabel('Loss')
@@ -63,12 +67,16 @@ def generate_training_plots(csv_path: str, output_dir: str) -> None:
         ax1.legend()
         ax1.grid(True, alpha=0.3)
         
-        # Plot 2: Reconstruction MSE
-        if 'ReconstructionMSE train' in df.columns:
-            ax2.plot(df['step'], df['ReconstructionMSE train'], label='Train MSE', linewidth=2)
-        if 'ReconstructionMSE val' in df.columns:
-            val_df = df[df['ReconstructionMSE val'].notna()]
-            ax2.plot(val_df['step'], val_df['ReconstructionMSE val'], label='Val MSE', 
+        # Plot 2: Reconstruction MSE or Metric
+        # Find metric columns (could be ReconstructionMSE, L1Loss, etc.)
+        train_metric_cols = [col for col in df.columns if col.endswith(' train') and 'Loss train' not in col and 'Learning Rate' not in col]
+        val_metric_cols = [col for col in df.columns if col.endswith(' val') and 'Loss val' not in col]
+        
+        if train_metric_cols:
+            ax2.plot(df['step'], df[train_metric_cols[0]], label=f'Train {train_metric_cols[0].replace(" train", "")}', linewidth=2)
+        if val_metric_cols:
+            val_df = df[df[val_metric_cols[0]].notna()]
+            ax2.plot(val_df['step'], val_df[val_metric_cols[0]], label=f'Val {val_metric_cols[0].replace(" val", "")}', 
                     marker='o', markersize=6, linewidth=2)
         ax2.set_xlabel('Epoch')
         ax2.set_ylabel('MSE')
@@ -145,6 +153,137 @@ def generate_training_plots(csv_path: str, output_dir: str) -> None:
         
     except Exception as e:
         logger.error(f"Failed to generate plots: {e}")
+
+
+def create_model_info_file(output_dir: str, cfg: DictConfig, model, train_module, dataset_info: dict = None) -> None:
+    """Create a comprehensive model_info.txt file with all training details"""
+    info_path = os.path.join(output_dir, 'model_info.txt')
+    
+    with open(info_path, 'w') as f:
+        f.write("=" * 80 + "\n")
+        f.write("MODEL TRAINING INFORMATION\n")
+        f.write("=" * 80 + "\n\n")
+        
+        # Timestamp
+        f.write(f"Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Training mode: {'DDP' if cfg.general.use_ddp else 'Single GPU'}\n\n")
+        
+        # Model Architecture
+        f.write("MODEL ARCHITECTURE\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Model name: {cfg.model.name}\n")
+        f.write(f"Model class: {model.__class__.__name__}\n")
+        
+        # Count parameters
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        f.write(f"Total parameters: {total_params:,}\n")
+        f.write(f"Trainable parameters: {trainable_params:,}\n")
+        f.write(f"Model size (MB): {total_params * 4 / 1024 / 1024:.2f}\n\n")
+        
+        # Model specific config
+        if hasattr(cfg.model, 'img_size'):
+            f.write("Model Configuration:\n")
+            for key, value in cfg.model.items():
+                if key != '_target_' and key != 'name':
+                    f.write(f"  {key}: {value}\n")
+            f.write("\n")
+        
+        # Training Configuration
+        f.write("TRAINING CONFIGURATION\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Epochs: {cfg.hparams.nb_epochs}\n")
+        f.write(f"Batch size: {cfg.hparams.batch_size}\n")
+        f.write(f"Learning rate: {cfg.hparams.lr}\n")
+        f.write(f"Validation interval: {cfg.hparams.valid_interval}\n")
+        if hasattr(cfg.hparams, 'accumulate_grad_batches'):
+            f.write(f"Gradient accumulation: {cfg.hparams.accumulate_grad_batches}\n")
+        f.write("\n")
+        
+        # Optimizer
+        f.write("OPTIMIZER\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Type: {train_module.optimizer.__class__.__name__}\n")
+        f.write(f"Config: {cfg.optimizer}\n\n")
+        
+        # Scheduler
+        f.write("SCHEDULER\n")
+        f.write("-" * 40 + "\n")
+        if hasattr(train_module, 'scheduler') and train_module.scheduler:
+            f.write(f"Type: {train_module.scheduler.__class__.__name__}\n")
+            f.write(f"Config: {cfg.scheduler}\n")
+        else:
+            f.write("No scheduler configured\n")
+        f.write("\n")
+        
+        # Loss Function
+        f.write("LOSS FUNCTION\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Type: {getattr(cfg.loss, '_target_', 'unknown')}\n")
+        for key, value in cfg.loss.items():
+            if key != '_target_':
+                f.write(f"  {key}: {value}\n")
+        f.write("\n")
+        
+        # Metric Function
+        f.write("METRIC FUNCTION\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Type: {getattr(cfg.metric, '_target_', 'unknown')}\n\n")
+        
+        # Dataset Information
+        f.write("DATASET\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Dataset config: {cfg.dataset.name if hasattr(cfg.dataset, 'name') else 'unknown'}\n")
+        if hasattr(cfg.dataset, 'csv_path'):
+            f.write(f"CSV path: {cfg.dataset.csv_path}\n")
+        if hasattr(cfg.dataset, 'trial_mode'):
+            f.write(f"Trial mode: {cfg.dataset.trial_mode}\n")
+            if cfg.dataset.trial_mode and hasattr(cfg.dataset, 'trial_size'):
+                f.write(f"Trial size: {cfg.dataset.trial_size}\n")
+        if dataset_info:
+            f.write(f"Train samples: {dataset_info.get('train_size', 'N/A')}\n")
+            f.write(f"Val samples: {dataset_info.get('val_size', 'N/A')}\n")
+        f.write("\n")
+        
+        # Data Augmentation
+        f.write("DATA AUGMENTATION\n")
+        f.write("-" * 40 + "\n")
+        if hasattr(cfg, 'augmentation'):
+            for aug in cfg.augmentation.transforms:
+                f.write(f"  - {aug.name}: {aug}\n")
+        else:
+            f.write("No augmentation configured\n")
+        f.write("\n")
+        
+        # Hardware Configuration
+        f.write("HARDWARE CONFIGURATION\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Use CUDA: {cfg.general.use_cuda}\n")
+        if cfg.general.use_ddp:
+            f.write(f"DDP enabled: True\n")
+            f.write(f"World size: {torch.cuda.device_count()}\n")
+        elif cfg.general.parallel.use_parallel:
+            f.write(f"DataParallel enabled: True\n")
+            f.write(f"Device IDs: {cfg.general.parallel.device_ids}\n")
+        else:
+            f.write(f"Device ID: {cfg.general.device_id}\n")
+        f.write(f"Num workers: {cfg.dataloader.num_workers}\n")
+        f.write(f"Pin memory: {cfg.dataloader.pin_memory}\n")
+        f.write(f"Use AMP: {cfg.general.use_amp}\n\n")
+        
+        # Output Configuration
+        f.write("OUTPUT CONFIGURATION\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Output directory: {output_dir}\n")
+        f.write(f"Save model: {cfg.general.save_model}\n")
+        f.write(f"Save results: {cfg.general.save_results}\n\n")
+        
+        # Model String Representation
+        f.write("FULL MODEL ARCHITECTURE\n")
+        f.write("-" * 40 + "\n")
+        f.write(str(model))
+        
+    logger.info(f"Created model info file: {info_path}")
 
 
 def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
@@ -319,10 +458,17 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
         os.makedirs(output_dir, exist_ok=True)
         csv_path = f"{output_dir}/metrics.csv"
         logger.info(f"[Rank {rank}] Metrics will be saved to: {csv_path}")
+        
+        # Create comprehensive model info file
+        dataset_info = {"train_size": len(dl_train) * cfg.hparams.batch_size, "val_size": len(dl_val) * cfg.hparams.batch_size}
+        create_model_info_file(output_dir, cfg, train_module.model, train_module, dataset_info)
 
     nb_epochs = cfg.hparams.nb_epochs
-    loss_fn = torch.nn.MSELoss().to(device)
-    metric_fn = torch.nn.L1Loss().to(device)
+    
+    # Instantiate loss and metric functions from config
+    from hydra.utils import instantiate
+    loss_fn = instantiate(cfg.loss).to(device)
+    metric_fn = instantiate(cfg.metric).to(device)
 
     # Main training loop
     for epoch in range(1, nb_epochs + 1):

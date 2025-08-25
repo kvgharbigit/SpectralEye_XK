@@ -69,6 +69,141 @@ class PrefetchLoader:
         return len(self.dataloader)
 
 
+def create_model_info_file(output_dir: str, cfg: DictConfig, model, train_module, dataset_info: dict = None) -> None:
+    """Create a comprehensive model_info.txt file with all training details"""
+    import os
+    from datetime import datetime
+    import torch
+    
+    info_path = os.path.join(output_dir, 'model_info.txt')
+    
+    with open(info_path, 'w') as f:
+        f.write("=" * 80 + "\n")
+        f.write("MODEL TRAINING INFORMATION\n")
+        f.write("=" * 80 + "\n\n")
+        
+        # Timestamp
+        f.write(f"Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Training mode: {'DDP' if cfg.general.use_ddp else 'Single GPU'}\n\n")
+        
+        # Model Architecture
+        f.write("MODEL ARCHITECTURE\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Model name: {cfg.model.name}\n")
+        f.write(f"Model class: {model.__class__.__name__}\n")
+        
+        # Count parameters
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        f.write(f"Total parameters: {total_params:,}\n")
+        f.write(f"Trainable parameters: {trainable_params:,}\n")
+        f.write(f"Model size (MB): {total_params * 4 / 1024 / 1024:.2f}\n\n")
+        
+        # Model specific config
+        if hasattr(cfg.model, 'img_size'):
+            f.write("Model Configuration:\n")
+            for key, value in cfg.model.items():
+                if key != '_target_' and key != 'name':
+                    f.write(f"  {key}: {value}\n")
+            f.write("\n")
+        
+        # Training Configuration
+        f.write("TRAINING CONFIGURATION\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Epochs: {cfg.hparams.nb_epochs}\n")
+        f.write(f"Batch size: {cfg.hparams.batch_size}\n")
+        f.write(f"Learning rate: {cfg.hparams.lr}\n")
+        f.write(f"Validation interval: {cfg.hparams.valid_interval}\n")
+        if hasattr(cfg.hparams, 'accumulate_grad_batches'):
+            f.write(f"Gradient accumulation: {cfg.hparams.accumulate_grad_batches}\n")
+        f.write("\n")
+        
+        # Optimizer
+        f.write("OPTIMIZER\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Type: {train_module.optimizer.__class__.__name__}\n")
+        f.write(f"Config: {cfg.optimizer}\n\n")
+        
+        # Scheduler
+        f.write("SCHEDULER\n")
+        f.write("-" * 40 + "\n")
+        if hasattr(train_module, 'scheduler') and train_module.scheduler:
+            f.write(f"Type: {train_module.scheduler.__class__.__name__}\n")
+            f.write(f"Config: {cfg.scheduler}\n")
+        else:
+            f.write("No scheduler configured\n")
+        f.write("\n")
+        
+        # Loss Function
+        f.write("LOSS FUNCTION\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Type: {getattr(cfg.loss, '_target_', 'unknown')}\n")
+        for key, value in cfg.loss.items():
+            if key != '_target_':
+                f.write(f"  {key}: {value}\n")
+        f.write("\n")
+        
+        # Metric Function
+        f.write("METRIC FUNCTION\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Type: {getattr(cfg.metric, '_target_', 'unknown')}\n\n")
+        
+        # Dataset Information
+        f.write("DATASET\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Dataset config: {cfg.dataset.name if hasattr(cfg.dataset, 'name') else 'unknown'}\n")
+        if hasattr(cfg.dataset, 'csv_path'):
+            f.write(f"CSV path: {cfg.dataset.csv_path}\n")
+        if hasattr(cfg.dataset, 'trial_mode'):
+            f.write(f"Trial mode: {cfg.dataset.trial_mode}\n")
+            if cfg.dataset.trial_mode and hasattr(cfg.dataset, 'trial_size'):
+                f.write(f"Trial size: {cfg.dataset.trial_size}\n")
+        if dataset_info:
+            f.write(f"Train samples: {dataset_info.get('train_size', 'N/A')}\n")
+            f.write(f"Val samples: {dataset_info.get('val_size', 'N/A')}\n")
+        f.write("\n")
+        
+        # Data Augmentation
+        f.write("DATA AUGMENTATION\n")
+        f.write("-" * 40 + "\n")
+        if hasattr(cfg, 'augmentation'):
+            for aug in cfg.augmentation.transforms:
+                f.write(f"  - {aug.name}: {aug}\n")
+        else:
+            f.write("No augmentation configured\n")
+        f.write("\n")
+        
+        # Hardware Configuration
+        f.write("HARDWARE CONFIGURATION\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Use CUDA: {cfg.general.use_cuda}\n")
+        if cfg.general.use_ddp:
+            f.write(f"DDP enabled: True\n")
+            f.write(f"World size: {torch.cuda.device_count()}\n")
+        elif cfg.general.parallel.use_parallel:
+            f.write(f"DataParallel enabled: True\n")
+            f.write(f"Device IDs: {cfg.general.parallel.device_ids}\n")
+        else:
+            f.write(f"Device ID: {cfg.general.device_id}\n")
+        f.write(f"Num workers: {cfg.dataloader.num_workers}\n")
+        f.write(f"Pin memory: {cfg.dataloader.pin_memory}\n")
+        f.write(f"Use AMP: {cfg.general.use_amp}\n\n")
+        
+        # Output Configuration
+        f.write("OUTPUT CONFIGURATION\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Output directory: {output_dir}\n")
+        f.write(f"Save model: {cfg.general.save_model}\n")
+        f.write(f"Save results: {cfg.general.save_results}\n\n")
+        
+        # Model String Representation
+        f.write("FULL MODEL ARCHITECTURE\n")
+        f.write("-" * 40 + "\n")
+        f.write(str(model))
+        
+    logger.info(f"Created model info file: {info_path}")
+
+
 def run_training(cfg: DictConfig):
     # Get Hydra runtime configuration (for saving outputs, etc.)
     hydra_config = HydraConfig.get()
@@ -206,6 +341,10 @@ def run_training(cfg: DictConfig):
         hydra_config = HydraConfig.get()
         csv_path = f"{hydra_config.runtime.output_dir}/metrics.csv"
         logger.info(f"Metrics will be saved to: {csv_path}")
+        
+        # --- Create comprehensive model info file ---
+        dataset_info = {"train_size": len(dl_train) * cfg.hparams.batch_size, "val_size": len(dl_val) * cfg.hparams.batch_size}
+        create_model_info_file(hydra_config.runtime.output_dir, cfg, train_module.model, train_module, dataset_info)
         
         # --- Training loop ---
         for epoch in range(1, cfg.hparams.nb_epochs + 1):

@@ -14,8 +14,8 @@ def check_ddp_mlflow_logging():
     mlflow.set_tracking_uri("file:./mlruns")
     print(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
     
-    # List all experiments
-    experiments = mlflow.list_experiments()
+    # List all experiments using search_experiments
+    experiments = mlflow.search_experiments()
     print(f"\nFound {len(experiments)} experiments:")
     
     for exp in experiments:

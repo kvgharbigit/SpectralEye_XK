@@ -271,8 +271,16 @@ def create_model_info_file(output_dir: str, cfg: DictConfig, model, train_module
         f.write("DATA AUGMENTATION\n")
         f.write("-" * 40 + "\n")
         if hasattr(cfg, 'augmentation'):
-            for aug in cfg.augmentation.transforms:
-                f.write(f"  - {aug.name}: {aug}\n")
+            try:
+                # Handle different augmentation config structures
+                if hasattr(cfg.augmentation, 'transforms'):
+                    for aug in cfg.augmentation.transforms:
+                        f.write(f"  - {getattr(aug, 'name', str(aug))}: {aug}\n")
+                else:
+                    # If transforms is not available, just show the config
+                    f.write(f"Augmentation config: {cfg.augmentation}\n")
+            except Exception as e:
+                f.write(f"Augmentation config (could not parse): {cfg.augmentation}\n")
         else:
             f.write("No augmentation configured\n")
         f.write("\n")

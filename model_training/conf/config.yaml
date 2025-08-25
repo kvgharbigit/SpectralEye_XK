@@ -23,7 +23,7 @@ hparams:
   nb_epochs: 200
   batch_size: 8
   lr: 0.0001
-  valid_interval: 2
+  valid_interval: 5
 
 general:
   working_dir: working_env

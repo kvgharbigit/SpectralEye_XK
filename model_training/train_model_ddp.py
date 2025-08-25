@@ -21,6 +21,10 @@ import mlflow
 import hydra
 from omegaconf import DictConfig
 from hydra.core.hydra_config import HydraConfig
+import pandas as pd
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+import matplotlib.pyplot as plt
 
 # Import your custom modules.
 # Adjust the import paths based on your project structure.
@@ -36,6 +40,113 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def generate_training_plots(csv_path: str, output_dir: str) -> None:
+    """Generate training plots from CSV metrics data"""
+    try:
+        # Read the CSV file
+        df = pd.read_csv(csv_path)
+        logger.info(f"Generating plots from {csv_path} with {len(df)} epochs")
+        
+        # Create figure with subplots
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
+        
+        # Plot 1: Training and Validation Loss
+        if 'CustomLoss train' in df.columns:
+            ax1.plot(df['step'], df['CustomLoss train'], label='Train Loss', linewidth=2)
+        if 'CustomLoss val' in df.columns:
+            val_df = df[df['CustomLoss val'].notna()]
+            ax1.plot(val_df['step'], val_df['CustomLoss val'], label='Val Loss', 
+                    marker='o', markersize=6, linewidth=2)
+        ax1.set_xlabel('Epoch')
+        ax1.set_ylabel('Loss')
+        ax1.set_title('Training and Validation Loss')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot 2: Reconstruction MSE
+        if 'ReconstructionMSE train' in df.columns:
+            ax2.plot(df['step'], df['ReconstructionMSE train'], label='Train MSE', linewidth=2)
+        if 'ReconstructionMSE val' in df.columns:
+            val_df = df[df['ReconstructionMSE val'].notna()]
+            ax2.plot(val_df['step'], val_df['ReconstructionMSE val'], label='Val MSE', 
+                    marker='o', markersize=6, linewidth=2)
+        ax2.set_xlabel('Epoch')
+        ax2.set_ylabel('MSE')
+        ax2.set_title('Reconstruction MSE')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        # Plot 3: Learning Rate
+        if 'Learning Rate' in df.columns:
+            ax3.plot(df['step'], df['Learning Rate'], color='green', linewidth=2)
+        ax3.set_xlabel('Epoch')
+        ax3.set_ylabel('Learning Rate')
+        ax3.set_title('Learning Rate Schedule')
+        ax3.grid(True, alpha=0.3)
+        ax3.set_yscale('log')
+        
+        # Plot 4: Loss components if available
+        loss_components = [col for col in df.columns if 'train' in col and col != 'CustomLoss train' 
+                          and col != 'ReconstructionMSE train']
+        if loss_components:
+            for comp in loss_components:
+                ax4.plot(df['step'], df[comp], label=comp.replace(' train', ''), linewidth=2)
+            ax4.set_xlabel('Epoch')
+            ax4.set_ylabel('Loss Value')
+            ax4.set_title('Loss Components')
+            ax4.legend()
+            ax4.grid(True, alpha=0.3)
+        else:
+            # If no loss components, show train vs val gap
+            if 'CustomLoss train' in df.columns and 'CustomLoss val' in df.columns:
+                val_df = df[df['CustomLoss val'].notna()]
+                gap = val_df['CustomLoss val'] - val_df['CustomLoss train']
+                ax4.plot(val_df['step'], gap, color='red', linewidth=2)
+                ax4.axhline(y=0, color='black', linestyle='--', alpha=0.5)
+                ax4.set_xlabel('Epoch')
+                ax4.set_ylabel('Val Loss - Train Loss')
+                ax4.set_title('Generalization Gap')
+                ax4.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        # Save the plot
+        plot_path = os.path.join(output_dir, 'training_curves.png')
+        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        logger.info(f"Saved training plots to {plot_path}")
+        
+        # Generate summary statistics
+        summary_path = os.path.join(output_dir, 'training_summary.txt')
+        with open(summary_path, 'w') as f:
+            f.write("Training Summary\n")
+            f.write("================\n\n")
+            f.write(f"Total Epochs: {len(df)}\n")
+            
+            if 'CustomLoss train' in df.columns:
+                f.write(f"Final Train Loss: {df['CustomLoss train'].iloc[-1]:.6f}\n")
+                f.write(f"Best Train Loss: {df['CustomLoss train'].min():.6f} (epoch {df['CustomLoss train'].idxmin() + 1})\n")
+            
+            if 'CustomLoss val' in df.columns:
+                val_df = df[df['CustomLoss val'].notna()]
+                if len(val_df) > 0:
+                    f.write(f"\nFinal Val Loss: {val_df['CustomLoss val'].iloc[-1]:.6f}\n")
+                    f.write(f"Best Val Loss: {val_df['CustomLoss val'].min():.6f} (epoch {val_df['CustomLoss val'].idxmin() + 1})\n")
+            
+            if 'ReconstructionMSE train' in df.columns:
+                f.write(f"\nFinal Train MSE: {df['ReconstructionMSE train'].iloc[-1]:.6f}\n")
+            
+            if 'ReconstructionMSE val' in df.columns:
+                val_df = df[df['ReconstructionMSE val'].notna()]
+                if len(val_df) > 0:
+                    f.write(f"Final Val MSE: {val_df['ReconstructionMSE val'].iloc[-1]:.6f}\n")
+        
+        logger.info(f"Saved training summary to {summary_path}")
+        
+    except Exception as e:
+        logger.error(f"Failed to generate plots: {e}")
+
+
 def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
     """
     Training function to be run in each process.
@@ -46,6 +157,11 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
     device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(cfg.general.seed)
     logger.info(f"[Rank {rank}] Running on device {device}")
+    
+    # Set MLflow tracking URI in each process to ensure proper connection
+    # This is critical for DDP as spawned processes don't inherit the MLflow context
+    mlflow.set_tracking_uri("file:./mlruns")
+    logger.info(f"[Rank {rank}] MLflow tracking URI set to: {mlflow.get_tracking_uri()}")
 
     # Initialize DDP if enabled
     if cfg.general.use_ddp:
@@ -139,8 +255,12 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
     # Start an mlflow run (only on rank 0 to avoid duplicate runs)
     if rank == 0:
         mlflow_run = mlflow.start_run(experiment_id=my_experiment.experiment_id, run_name=run_name)
+        logger.info(f"[Rank {rank}] Started MLflow run: {mlflow_run.info.run_id}")
+        logger.info(f"[Rank {rank}] MLflow experiment ID: {my_experiment.experiment_id}")
+        logger.info(f"[Rank {rank}] MLflow tracking URI: {mlflow.get_tracking_uri()}")
         # (Optionally log the entire config or specific parameters)
         mlflow.log_params(OmegaConf.to_container(cfg, resolve=True))
+        logger.info(f"[Rank {rank}] Logged parameters to MLflow")
     else:
         mlflow_run = None
         
@@ -189,6 +309,10 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
                 model_path = f"{output_dir}/model_{epoch}.pth"
                 save_model(train_module.model, model_path, cfg.general.use_ddp or cfg.general.parallel.use_parallel)
                 logger.info(f"Saved model checkpoint: {model_path}")
+                
+                # Generate plots after each validation
+                if csv_path and os.path.exists(csv_path):
+                    generate_training_plots(csv_path, output_dir)
         
         # Clean up memory before synchronization
         if device.type == "cuda":
@@ -198,6 +322,11 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
         if cfg.general.use_ddp:
             dist.barrier()
 
+    # Generate final plots before ending (only rank 0)
+    if rank == 0 and csv_path and output_dir and os.path.exists(csv_path):
+        logger.info("Generating final training plots...")
+        generate_training_plots(csv_path, output_dir)
+    
     # End MLflow run if we started one
     if rank == 0 and mlflow_run:
         mlflow.end_run()

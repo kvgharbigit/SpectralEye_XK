@@ -42,10 +42,32 @@ logger = logging.getLogger(__name__)
 
 def generate_training_plots(csv_path: str, output_dir: str) -> None:
     """Generate training plots from CSV metrics data"""
+    import time
+    import fcntl
+    
     try:
-        # Read the CSV file
-        df = pd.read_csv(csv_path)
-        logger.info(f"Generating plots from {csv_path} with {len(df)} epochs")
+        # Add a small delay to ensure CSV write is complete
+        time.sleep(0.1)
+        
+        # Read the CSV file with retry logic
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                df = pd.read_csv(csv_path)
+                break
+            except (pd.errors.EmptyDataError, FileNotFoundError, PermissionError) as e:
+                if attempt < max_retries - 1:
+                    logger.debug(f"Attempt {attempt + 1} failed to read CSV: {e}, retrying...")
+                    time.sleep(0.2)
+                else:
+                    logger.warning(f"Failed to read CSV after {max_retries} attempts: {e}")
+                    return
+        
+        if len(df) == 0:
+            logger.debug("CSV file is empty, skipping plot generation")
+            return
+            
+        logger.debug(f"Generating plots from {csv_path} with {len(df)} epochs")
         
         # Create figure with subplots
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
@@ -469,7 +491,6 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
     nb_epochs = cfg.hparams.nb_epochs
     
     # Instantiate loss and metric functions from config
-    from hydra.utils import instantiate
     loss_fn = instantiate(cfg.loss).to(device)
     metric_fn = instantiate(cfg.metric).to(device)
 
@@ -502,10 +523,12 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
                 model_path = f"{output_dir}/model_{epoch}.pth"
                 save_model(train_module.model, model_path, cfg.general.use_ddp or cfg.general.parallel.use_parallel)
                 logger.info(f"Saved model checkpoint: {model_path}")
-                
-                # Generate plots after each validation
-                if csv_path and os.path.exists(csv_path):
-                    generate_training_plots(csv_path, output_dir)
+        
+        # Generate plots more frequently (only rank 0, after CSV is updated)
+        if rank == 0 and csv_path and output_dir and os.path.exists(csv_path):
+            # Update plots every 5 epochs or at validation intervals
+            if epoch % 5 == 0 or epoch % cfg.hparams.valid_interval == 0:
+                generate_training_plots(csv_path, output_dir)
         
         # Clean up memory before synchronization
         if device.type == "cuda":

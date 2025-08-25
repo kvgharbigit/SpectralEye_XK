@@ -19,8 +19,14 @@ def log_metrics(metrics: dict[str, float], current_step: int, csv_path: str = No
 
     # Only rank 0 logs to avoid conflicts
     if rank == 0:
-        for key, value in metrics.items():
-            mlflow.log_metric(key=f"{key}", value=value, step=current_step)
+        try:
+            for key, value in metrics.items():
+                mlflow.log_metric(key=f"{key}", value=value, step=current_step)
+            logger.debug(f"Successfully logged {len(metrics)} metrics to MLflow at step {current_step}")
+        except Exception as e:
+            logger.warning(f"Failed to log metrics to MLflow: {e}")
+            logger.warning(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
+            logger.warning(f"Active run: {mlflow.active_run()}")
         
         # Log to CSV if path provided
         if csv_path:

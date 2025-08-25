@@ -160,7 +160,7 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
     
     # Set MLflow tracking URI in each process to ensure proper connection
     # This is critical for DDP as spawned processes don't inherit the MLflow context
-    mlflow.set_tracking_uri("file:./mlruns")
+    mlflow.set_tracking_uri("file:model_training/mlruns")
     logger.info(f"[Rank {rank}] MLflow tracking URI set to: {mlflow.get_tracking_uri()}")
 
     # Initialize DDP if enabled
@@ -227,8 +227,9 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
             import os
             from datetime import datetime
             
-            mapping_file = "mlruns/experiment_mapping.json"
-            os.makedirs("mlruns", exist_ok=True)
+            # Update global mapping file
+            mapping_file = "model_training/mlruns/experiment_mapping.json"
+            os.makedirs("model_training/mlruns", exist_ok=True)
             
             if os.path.exists(mapping_file):
                 with open(mapping_file, 'r') as f:
@@ -237,16 +238,59 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
                 mapping = {}
             
             exp_id = str(my_experiment.experiment_id)
+            now = datetime.now()
+            
             mapping[exp_id] = {
                 "name": cfg.mlflow.experiment_name,
                 "model": cfg.model.name,
                 "dataset": getattr(cfg.dataset, 'name', 'unknown'),
                 "run_name": run_name,
-                "last_updated": datetime.now().isoformat()
+                "last_updated": now.isoformat()
             }
             
             with open(mapping_file, 'w') as f:
                 json.dump(mapping, f, indent=2)
+            
+            # Create detailed experiment info in the experiment's directory
+            exp_dir = f"model_training/mlruns/{exp_id}"
+            if os.path.exists(exp_dir):
+                exp_info_file = os.path.join(exp_dir, "experiment_info.json")
+                
+                # Convert MLflow timestamps to human-readable format
+                creation_time_ms = my_experiment.creation_time
+                creation_time = datetime.fromtimestamp(creation_time_ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                last_update_ms = my_experiment.last_update_time
+                last_update_time = datetime.fromtimestamp(last_update_ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                
+                exp_info = {
+                    "experiment_id": exp_id,
+                    "name": cfg.mlflow.experiment_name,
+                    "model": cfg.model.name,
+                    "dataset": getattr(cfg.dataset, 'name', 'unknown'),
+                    "artifact_location": my_experiment.artifact_location,
+                    "lifecycle_stage": my_experiment.lifecycle_stage,
+                    "creation_time": creation_time,
+                    "creation_time_ms": creation_time_ms,
+                    "last_update_time": last_update_time,
+                    "last_update_time_ms": last_update_ms,
+                    "current_run_name": run_name,
+                    "current_run_start": now.strftime("%Y-%m-%d %H:%M:%S"),
+                    "config": {
+                        "batch_size": cfg.hparams.batch_size,
+                        "learning_rate": cfg.hparams.lr,
+                        "epochs": cfg.hparams.nb_epochs,
+                        "valid_interval": cfg.hparams.valid_interval,
+                        "optimizer": getattr(cfg.optimizer, '_target_', 'unknown').split('.')[-1],
+                        "loss": getattr(cfg.loss, '_target_', 'unknown').split('.')[-1],
+                        "use_ddp": cfg.general.use_ddp,
+                        "device_ids": getattr(cfg.general.parallel, 'device_ids', [cfg.general.device_id])
+                    }
+                }
+                
+                with open(exp_info_file, 'w') as f:
+                    json.dump(exp_info, f, indent=2)
+                
+                logger.info(f"[Rank {rank}] Created experiment info: {exp_info_file}")
             
             logger.info(f"[Rank {rank}] Experiment mapping updated: ID {exp_id} -> {cfg.model.name}")
         

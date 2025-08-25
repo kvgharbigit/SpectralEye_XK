@@ -340,6 +340,9 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
     if cfg.general.use_ddp:
         train_module.model = nn.parallel.DistributedDataParallel(train_module.model, device_ids=[rank])
 
+    # Import instantiate at the beginning
+    from hydra.utils import instantiate
+    
     # Optionally instantiate prediction functions from your configuration.
     if cfg.show_prediction:
         show_predictions = {}

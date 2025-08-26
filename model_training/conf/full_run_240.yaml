@@ -1,4 +1,4 @@
-# Complete preset configuration for 240x240 training
+# Complete configuration for 240x240 full training run
 
 defaults:
   - /config
@@ -23,3 +23,9 @@ general:
   parallel:
     use_parallel: true
     device_ids: [0, 1, 2]
+
+# Optimized data loading for 240x240 (smaller files load faster)
+dataloader:
+  num_workers: 8  # Increased from default 2
+  pin_memory: true
+  prefetch_factor: 4  # Increased from default 2

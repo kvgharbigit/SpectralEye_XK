@@ -1,0 +1,30 @@
+# DDP Trial run preset for 240x240 training with limited data
+
+defaults:
+  - /config
+  - override /model: mae_medium_240
+  - override /dataset: dataset_240
+
+# Enable DDP and trial mode
+general:
+  use_ddp: true
+  parallel:
+    use_parallel: true
+    device_ids: [0, 1, 2]
+
+# Trial run parameters
+dataset:
+  trial_mode: true
+  trial_size: 100
+
+# Reduced training for quick test
+hparams:
+  nb_epochs: 20
+  batch_size: 4
+  lr: 0.0001
+  valid_interval: 5
+
+# Smaller working directory for trial
+hydra:
+  run:
+    dir: ./model_training/working_env/trial_ddp_240/${now:%Y-%m-%d}/${now:%H-%M-%S}

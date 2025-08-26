@@ -216,6 +216,233 @@ def create_model_info_file(output_dir: str, cfg: DictConfig, model, train_module
     logger.info(f"Created model info file: {info_path}")
 
 
+def generate_training_plots(csv_path: str, output_dir: str) -> None:
+    """Generate training plots from CSV metrics data"""
+    import time
+    
+    try:
+        # Add a small delay to ensure CSV write is complete
+        time.sleep(0.1)
+        
+        # Read the CSV file with retry logic
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                df = pd.read_csv(csv_path)
+                break
+            except (pd.errors.EmptyDataError, FileNotFoundError, PermissionError) as e:
+                if attempt < max_retries - 1:
+                    logger.debug(f"Attempt {attempt + 1} failed to read CSV: {e}, retrying...")
+                    time.sleep(0.2)
+                else:
+                    logger.warning(f"Failed to read CSV after {max_retries} attempts: {e}")
+                    return
+        
+        if len(df) == 0:
+            logger.debug("CSV file is empty, skipping plot generation")
+            return
+            
+        logger.debug(f"Generating plots from {csv_path} with {len(df)} epochs")
+        
+        # Create figure with subplots
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
+        
+        # Plot 1: Training and Validation Loss
+        # Debug: print column names to understand structure
+        logger.debug(f"CSV columns: {list(df.columns)}")
+        
+        # Find loss columns (could be CustomLoss, MSELoss, etc.)
+        train_loss_cols = [col for col in df.columns if 'Loss train' in col or (col.endswith(' train') and 'Loss' in col)]
+        val_loss_cols = [col for col in df.columns if 'Loss val' in col or (col.endswith(' val') and 'Loss' in col)]
+        
+        logger.debug(f"Train loss columns found: {train_loss_cols}")
+        logger.debug(f"Val loss columns found: {val_loss_cols}")
+        
+        if train_loss_cols:
+            ax1.plot(df['step'], df[train_loss_cols[0]], label='Train Loss', linewidth=2)
+        if val_loss_cols:
+            val_df = df[df[val_loss_cols[0]].notna()]
+            if len(val_df) > 0:
+                # Only show markers if validation data is sparse (not every epoch)
+                total_epochs = len(df)
+                val_epochs = len(val_df)
+                is_sparse = val_epochs < (total_epochs * 0.8)  # Less than 80% of epochs have val data
+                
+                if is_sparse:
+                    ax1.plot(val_df['step'], val_df[val_loss_cols[0]], label='Val Loss', 
+                            marker='o', markersize=6, linewidth=2)
+                else:
+                    ax1.plot(val_df['step'], val_df[val_loss_cols[0]], label='Val Loss', 
+                            linewidth=2)  # No markers for dense validation data
+            else:
+                logger.debug("No validation data found in CSV")
+        ax1.set_xlabel('Epoch')
+        ax1.set_ylabel('Loss')
+        ax1.set_title('Training and Validation Loss')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot 2: Reconstruction MSE or Metric
+        # Find metric columns (could be ReconstructionMSE, L1Loss, etc.)
+        train_metric_cols = [col for col in df.columns if col.endswith(' train') and not any(x in col for x in ['Loss train', 'Learning Rate'])]
+        val_metric_cols = [col for col in df.columns if col.endswith(' val') and 'Loss val' not in col]
+        
+        logger.debug(f"Train metric columns found: {train_metric_cols}")
+        logger.debug(f"Val metric columns found: {val_metric_cols}")
+        
+        if train_metric_cols:
+            ax2.plot(df['step'], df[train_metric_cols[0]], label=f'Train {train_metric_cols[0].replace(" train", "")}', linewidth=2)
+        if val_metric_cols:
+            val_df = df[df[val_metric_cols[0]].notna()]
+            if len(val_df) > 0:
+                # Only show markers if validation data is sparse (not every epoch)
+                total_epochs = len(df)
+                val_epochs = len(val_df)
+                is_sparse = val_epochs < (total_epochs * 0.8)  # Less than 80% of epochs have val data
+                
+                if is_sparse:
+                    ax2.plot(val_df['step'], val_df[val_metric_cols[0]], label=f'Val {val_metric_cols[0].replace(" val", "")}', 
+                            marker='o', markersize=6, linewidth=2)
+                else:
+                    ax2.plot(val_df['step'], val_df[val_metric_cols[0]], label=f'Val {val_metric_cols[0].replace(" val", "")}', 
+                            linewidth=2)  # No markers for dense validation data
+            else:
+                logger.debug("No validation metric data found in CSV")
+        ax2.set_xlabel('Epoch')
+        ax2.set_ylabel('MSE')
+        ax2.set_title('Reconstruction MSE')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        # Plot 3: Learning Rate
+        if 'Learning Rate' in df.columns:
+            ax3.plot(df['step'], df['Learning Rate'], color='green', linewidth=2)
+        ax3.set_xlabel('Epoch')
+        ax3.set_ylabel('Learning Rate')
+        ax3.set_title('Learning Rate Schedule')
+        ax3.grid(True, alpha=0.3)
+        ax3.set_yscale('log')
+        
+        # Plot 4: Loss components if available
+        loss_components = [col for col in df.columns if 'train' in col and col != 'CustomLoss train' 
+                          and col != 'ReconstructionMSE train']
+        if loss_components:
+            for comp in loss_components:
+                ax4.plot(df['step'], df[comp], label=comp.replace(' train', ''), linewidth=2)
+            ax4.set_xlabel('Epoch')
+            ax4.set_ylabel('Loss Value')
+            ax4.set_title('Loss Components')
+            ax4.legend()
+            ax4.grid(True, alpha=0.3)
+        else:
+            # If no loss components, show train vs val gap
+            if train_loss_cols and val_loss_cols:
+                train_col = train_loss_cols[0]
+                val_col = val_loss_cols[0]
+                # Get validation epochs only
+                val_df = df[df[val_col].notna()].copy()
+                if len(val_df) > 0:
+                    # Calculate gap for validation epochs only
+                    gap = val_df[val_col] - val_df[train_col]
+                    ax4.plot(val_df['step'], gap, color='red', linewidth=2)
+                    ax4.axhline(y=0, color='black', linestyle='--', alpha=0.5)
+                    ax4.set_xlabel('Epoch')
+                    ax4.set_ylabel('Val Loss - Train Loss')
+                    ax4.set_title('Generalization Gap')
+                    ax4.grid(True, alpha=0.3)
+                else:
+                    ax4.text(0.5, 0.5, 'No validation data available', 
+                           horizontalalignment='center', verticalalignment='center', 
+                           transform=ax4.transAxes)
+                    ax4.set_title('Generalization Gap')
+            else:
+                ax4.text(0.5, 0.5, 'Insufficient data for gap calculation', 
+                       horizontalalignment='center', verticalalignment='center', 
+                       transform=ax4.transAxes)
+                ax4.set_title('Generalization Gap')
+        
+        plt.tight_layout()
+        
+        # Save the plot
+        plot_path = os.path.join(output_dir, 'training_curves.png')
+        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        logger.info(f"Saved training plots to {plot_path}")
+        
+        # Generate summary statistics
+        summary_path = os.path.join(output_dir, 'training_summary.txt')
+        with open(summary_path, 'w') as f:
+            f.write("Training Summary\n")
+            f.write("================\n\n")
+            f.write(f"Total Epochs: {len(df)}\n")
+            
+            if 'CustomLoss train' in df.columns:
+                f.write(f"Final Train Loss: {df['CustomLoss train'].iloc[-1]:.6f}\n")
+                f.write(f"Best Train Loss: {df['CustomLoss train'].min():.6f} (epoch {df['CustomLoss train'].idxmin() + 1})\n")
+            
+            if 'CustomLoss val' in df.columns:
+                val_df = df[df['CustomLoss val'].notna()]
+                if len(val_df) > 0:
+                    f.write(f"\nFinal Val Loss: {val_df['CustomLoss val'].iloc[-1]:.6f}\n")
+                    f.write(f"Best Val Loss: {val_df['CustomLoss val'].min():.6f} (epoch {val_df['CustomLoss val'].idxmin() + 1})\n")
+            
+            if 'ReconstructionMSE train' in df.columns:
+                f.write(f"\nFinal Train MSE: {df['ReconstructionMSE train'].iloc[-1]:.6f}\n")
+            
+            if 'ReconstructionMSE val' in df.columns:
+                val_df = df[df['ReconstructionMSE val'].notna()]
+                if len(val_df) > 0:
+                    f.write(f"Final Val MSE: {val_df['ReconstructionMSE val'].iloc[-1]:.6f}\n")
+        
+        logger.info(f"Saved training summary to {summary_path}")
+        
+    except Exception as e:
+        logger.error(f"Failed to generate plots: {e}")
+
+
+def copy_small_files_to_network(local_dir: str, run_name: str, rank: int = 0) -> None:
+    """Copy small files to network drive (only rank 0 should call this)"""
+    if rank != 0:
+        return
+        
+    import shutil
+    try:
+        network_base = r"Z:\Projects\Ophthalmic neuroscience\Projects\Kayvan\SpectralEye_XK_Outputs"
+        network_dir = os.path.join(network_base, run_name)
+        
+        # Create network directory
+        os.makedirs(network_dir, exist_ok=True)
+        
+        # Files to copy (small files only)
+        small_files = [
+            "metrics.csv",
+            "model_info.txt", 
+            "training_summary.txt",
+            "training_curves.png"
+        ]
+        
+        for filename in small_files:
+            local_file = os.path.join(local_dir, filename)
+            if os.path.exists(local_file):
+                network_file = os.path.join(network_dir, filename)
+                shutil.copy2(local_file, network_file)
+                logger.debug(f"Copied {filename} to network drive")
+        
+        # Copy experiment info if it exists
+        exp_info_pattern = os.path.join(local_dir, "*experiment_info.json")
+        import glob
+        for exp_file in glob.glob(exp_info_pattern):
+            filename = os.path.basename(exp_file)
+            network_file = os.path.join(network_dir, filename)
+            shutil.copy2(exp_file, network_file)
+            logger.debug(f"Copied {filename} to network drive")
+            
+        logger.info(f"Small files copied to network drive: {network_dir}")
+        
+    except Exception as e:
+        logger.warning(f"Failed to copy files to network drive: {e}")
+
+
 def run_training(cfg: DictConfig):
     # Get Hydra runtime configuration (for saving outputs, etc.)
     hydra_config = HydraConfig.get()
@@ -394,6 +621,14 @@ def run_training(cfg: DictConfig):
             gc.collect()
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
+        
+        # Generate final plots and copy to network drive at end of training
+        if os.path.exists(csv_path):
+            logger.info("Generating final training plots...")
+            generate_training_plots(csv_path, hydra_config.runtime.output_dir)
+            # Final copy to network drive
+            run_name = os.path.basename(hydra_config.runtime.output_dir)
+            copy_small_files_to_network(hydra_config.runtime.output_dir, run_name, rank=0)
 
 
 

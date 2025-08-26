@@ -21,7 +21,7 @@ dataloader:
 
 hparams:
   nb_epochs: 250
-  batch_size: 3
+  batch_size: 2
   lr: 0.0001
   valid_interval: 5
 

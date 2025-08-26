@@ -20,8 +20,8 @@ dataloader:
   shuffle: true
 
 hparams:
-  nb_epochs: 200
-  batch_size: 5
+  nb_epochs: 250
+  batch_size: 4
   lr: 0.0001
   valid_interval: 5
 

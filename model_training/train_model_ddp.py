@@ -629,14 +629,12 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
                 save_model(train_module.model, model_path, cfg.general.use_ddp or cfg.general.parallel.use_parallel)
                 logger.info(f"Saved model checkpoint: {model_path}")
         
-        # Generate plots more frequently (only rank 0, after CSV is updated)
+        # Generate plots and copy to server drive after every CSV update (every epoch)
         if rank == 0 and csv_path and output_dir and os.path.exists(csv_path):
-            # Update plots every 5 epochs or at validation intervals
-            if epoch % 5 == 0 or epoch % cfg.hparams.valid_interval == 0:
-                generate_training_plots(csv_path, output_dir)
-                # Copy small files to network drive (non-blocking)
-                run_name = os.path.basename(output_dir)
-                copy_small_files_to_network(output_dir, run_name, rank)
+            generate_training_plots(csv_path, output_dir)
+            # Copy small files to network drive after every CSV update
+            run_name = os.path.basename(output_dir)
+            copy_small_files_to_network(output_dir, run_name, rank)
         
         # Clean up memory before synchronization
         if device.type == "cuda":

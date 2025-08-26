@@ -2,6 +2,8 @@ import gc
 import logging
 from time import perf_counter
 import hydra
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 import mlflow
 import numpy as np
@@ -20,6 +22,8 @@ from PIL import Image
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR
 from torchvision.transforms import Compose
+import os
+from datetime import datetime
 
 from model_training.plots.plot_bottleneck import display_rgb, display_latent
 from model_training.train_val.epoch_results import EpochResults
@@ -379,6 +383,13 @@ def run_training(cfg: DictConfig):
                 model_path = cfg.general.model_path or f"{hydra_config.runtime.output_dir}/model_{epoch}.pth"
                 save_model(train_module.model, model_path, cfg.general.parallel.use_parallel)
                 logger.info(f"Saved model checkpoint: {model_path}")
+
+            # Generate plots after every CSV update (every epoch)
+            if os.path.exists(csv_path):
+                generate_training_plots(csv_path, hydra_config.runtime.output_dir)
+                # Copy small files to network drive after every CSV update
+                run_name = os.path.basename(hydra_config.runtime.output_dir)
+                copy_small_files_to_network(hydra_config.runtime.output_dir, run_name, rank=0)
 
             gc.collect()
             torch.cuda.empty_cache()

@@ -8,6 +8,7 @@ The training module implements state-of-the-art Vision Transformer architectures
 
 **Key Features:**
 - Multiple MAE-ViT model variants (tiny to huge)
+- **Configurable spatial dimensions**: 240x240 and 500x500 support
 - Self-supervised learning with masked reconstruction
 - Multi-GPU training support (DataParallel/DDP)
 - Comprehensive experiment tracking with MLflow
@@ -26,15 +27,27 @@ model_training/
 │   ├── loss/               # Loss function configs
 │   ├── metric/             # Evaluation metric configs
 │   ├── model/              # Model architecture configs
-│   │   ├── mae_tiny.yaml   # Tiny model configuration
-│   │   ├── mae_small.yaml  # Small model configuration
-│   │   ├── mae_base.yaml   # Base model configuration
-│   │   ├── mae_medium.yaml # Medium model (default)
-│   │   ├── mae_large.yaml  # Large model configuration
-│   │   └── mae_huge.yaml   # Huge model configuration
+│   │   ├── mae_tiny.yaml   # Tiny model (500x500)
+│   │   ├── mae_small.yaml  # Small model (500x500)
+│   │   ├── mae_base.yaml   # Base model (500x500)
+│   │   ├── mae_medium.yaml # Medium model (500x500, default)
+│   │   ├── mae_large.yaml  # Large model (500x500)
+│   │   ├── mae_huge.yaml   # Huge model (500x500)
+│   │   ├── mae_tiny_240.yaml   # Tiny model (240x240)
+│   │   ├── mae_small_240.yaml  # Small model (240x240)
+│   │   ├── mae_base_240.yaml   # Base model (240x240)
+│   │   ├── mae_medium_240.yaml # Medium model (240x240)
+│   │   ├── mae_large_240.yaml  # Large model (240x240)
+│   │   └── mae_huge_240.yaml   # Huge model (240x240)
 │   ├── optimizer/          # Optimizer configs
 │   ├── scheduler/          # Learning rate scheduler configs
 │   └── show_prediction/    # Visualization configs
+│   ├── dataset/            # Dataset configurations
+│   │   ├── combined_dataset.yaml  # 500x500 dataset config
+│   │   └── dataset_240.yaml       # 240x240 dataset config
+│   └── preset/             # Complete training presets
+│       ├── preset_240.yaml # 240x240 training preset
+│       └── trial_ddp_240.yaml # DDP trial run (240x240)
 ├── dataset/                # Dataset implementations
 ├── losses/                 # Custom loss functions
 ├── metrics/                # Evaluation metrics
@@ -76,7 +89,9 @@ Specialized training script optimized for medium-sized models:
 
 ### Available Models
 
-The system implements several MAE-ViT variants optimized for hyperspectral data:
+The system implements several MAE-ViT variants optimized for hyperspectral data in two spatial dimensions:
+
+#### 500x500 Models (25x25 spatial patches)
 
 | Model | Encoder Layers | Encoder Heads | Embed Dim | Decoder Layers | Decoder Heads | Decoder Embed Dim | Parameters |
 |-------|----------------|---------------|-----------|----------------|---------------|------------------|------------|
@@ -87,14 +102,25 @@ The system implements several MAE-ViT variants optimized for hyperspectral data:
 | mae_large | 12 | 12 | 960 | 8 | 8 | 256 | ~307M |
 | mae_huge | 12 | 12 | 1200 | 8 | 8 | 320 | ~632M |
 
+#### 240x240 Models (12x12 spatial patches)
+
+All 240x240 models maintain identical architecture parameters but use:
+- **Image size**: 240×240 pixels
+- **Spatial patch size**: 12×12 pixels  
+- **Same patch count**: 20×20 = 400 spatial patches (identical to 500x500 models)
+
+Available as: `mae_tiny_240`, `mae_small_240`, `mae_base_240`, `mae_medium_240`, `mae_large_240`, `mae_huge_240`
+
 ### Model Configuration
 
 **Common parameters:**
-- **Image size**: 500×500 pixels
 - **Spectral channels**: 30 wavelengths
-- **Spatial patch size**: 25×25 pixels
 - **Spectral patch size**: 5 wavelengths
 - **Mask ratio**: 0.8 (80% of patches masked during training)
+
+**Spatial configurations:**
+- **500x500 models**: Image size 500×500, spatial patches 25×25 → 20×20 = 400 patches
+- **240x240 models**: Image size 240×240, spatial patches 12×12 → 20×20 = 400 patches
 
 ## Configuration System
 
@@ -163,29 +189,40 @@ mask_ratio: 0.8
 
 ### Basic Training
 
-1. **Single-GPU training with default configuration**:
+#### 500x500 Training (Default)
+
+1. **Single-GPU training**:
    ```bash
    python train_model.py
    ```
 
-2. **Train specific model variant**:
-   ```bash
-   python train_model.py model=mae_large
-   ```
-
-3. **Train MAE Base model**:
-   ```bash
-   python train_model.py model=mae_base
-   ```
-
-3. **Multi-GPU DDP training** (recommended for multiple GPUs):
+2. **Multi-GPU DDP training**:
    ```bash
    python train_model_ddp.py model=mae_base hparams.nb_epochs=50 general.use_ddp=true
    ```
 
-4. **Custom configuration**:
+#### 240x240 Training
+
+3. **240x240 training with preset**:
    ```bash
-   python train_model.py hparams.batch_size=4 hparams.epochs=100
+   python train_model.py --config-name=preset_240
+   ```
+
+4. **240x240 DDP training**:
+   ```bash
+   python train_model_ddp.py model=mae_medium_240 dataset=dataset_240 general.use_ddp=true
+   ```
+
+#### Trial Runs
+
+5. **Quick DDP trial (240x240, 100 samples, 20 epochs)**:
+   ```bash
+   python train_model_ddp.py --config-name=trial_ddp_240
+   ```
+
+6. **Custom configuration**:
+   ```bash
+   python train_model.py model=mae_large_240 hparams.batch_size=4 hparams.epochs=100
    ```
 
 ### Advanced Usage
@@ -201,17 +238,19 @@ python train_model.py mlflow.tags.version="v1.0"
 
 #### Model Architecture Exploration
 ```bash
-# Tiny model for quick experiments
+# 500x500 models
 python train_model.py model=mae_tiny hparams.batch_size=16
-
-# MAE Base model for ViT-Base architecture benchmarking
 python train_model.py model=mae_base hparams.batch_size=6
-
-# Large model with reduced batch size
 python train_model.py model=mae_large hparams.batch_size=2
+
+# 240x240 models  
+python train_model.py model=mae_tiny_240 hparams.batch_size=16
+python train_model.py model=mae_base_240 hparams.batch_size=6
+python train_model.py model=mae_large_240 hparams.batch_size=2
 
 # DDP training for faster multi-GPU training
 python train_model_ddp.py model=mae_tiny hparams.nb_epochs=30 general.use_ddp=true
+python train_model_ddp.py model=mae_tiny_240 hparams.nb_epochs=30 general.use_ddp=true
 ```
 
 #### Multi-GPU Training Options
@@ -343,12 +382,19 @@ Additional preprocessing functions available in `utils/preprocess_hsi.py`:
 
 ### Data Loading Configuration
 
-**Default CSV Path**: The dataset is currently configured to use:
+**Dataset Paths**: The system supports two dataset configurations:
+
+**500x500 Dataset** (`conf/dataset/combined_dataset.yaml`):
 ```
 F:\Foundational_model\data_500\data_all.csv
 ```
 
-This path is set in `conf/dataset/combined_dataset.yaml` and can be overridden via command line:
+**240x240 Dataset** (`conf/dataset/dataset_240.yaml`):
+```
+F:\Foundational_model\data_240\data_all.csv
+```
+
+Paths can be overridden via command line:
 ```bash
 python train_model.py dataset.csv_path="/path/to/your/dataset.csv"
 ```

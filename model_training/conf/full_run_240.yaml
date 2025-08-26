@@ -8,7 +8,7 @@ defaults:
 
 # Optimized hyperparameters for 240x240 full training
 hparams:
-  batch_size: 8  # Optimal for mae_medium_240 on 11GB GPUs
+  batch_size: 2  # Optimal for mae_medium_240 on 11GB GPUs
   nb_epochs: 250
   lr: 0.0001
   valid_interval: 10  # Validation every 10 epochs for long training

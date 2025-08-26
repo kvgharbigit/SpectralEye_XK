@@ -8,7 +8,7 @@ defaults:
 
 # Optimized hyperparameters for 240x240 images
 hparams:
-  batch_size: 4  # Can use larger batch with smaller images
+  batch_size: 10  # Can use larger batch with smaller images
   nb_epochs: 250
   lr: 0.0001
 

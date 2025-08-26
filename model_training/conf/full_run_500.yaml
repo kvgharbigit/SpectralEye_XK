@@ -1,0 +1,31 @@
+# Complete configuration for 500x500 full training run
+
+defaults:
+  - /config
+  - override /model: mae_medium
+  - override /dataset: combined_dataset
+  - override /scheduler: cosine_annealing
+
+# Optimized hyperparameters for 500x500 full training
+hparams:
+  batch_size: 2  # Conservative for mae_medium on 11GB GPUs
+  nb_epochs: 250
+  lr: 0.0001
+  valid_interval: 10  # Validation every 10 epochs for long training
+
+# Full dataset training
+dataset:
+  trial_mode: false
+
+# Enable DDP for faster training
+general:
+  use_ddp: true
+  parallel:
+    use_parallel: true
+    device_ids: [0, 1, 2]
+
+# Standard data loading for 500x500
+dataloader:
+  num_workers: 4  # Moderate for larger files
+  pin_memory: true
+  prefetch_factor: 2

@@ -74,7 +74,7 @@ def test_forward_pass(model, img_size: int, batch_size: int = 2):
     """Test forward pass with synthetic data"""
     print(f"\n=== Testing forward pass (batch_size={batch_size}) ===")
     try:
-        # Create synthetic input
+        # Create synthetic input - correct format for conv3d: [batch, channels, depth, height, width]
         x = torch.randn(batch_size, 1, 30, img_size, img_size)
         print(f"   Input shape: {x.shape}")
         

@@ -13,7 +13,7 @@ model:
 
   decoder_embed_dim: 256
   decoder_depth: 8
-  decoder_num_heads: 12
+  decoder_num_heads: 8
 
   mlp_ratio: 4
   mask_ratio: 0.8

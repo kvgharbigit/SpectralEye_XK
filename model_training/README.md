@@ -230,6 +230,26 @@ python train_model.py general.device_id=0
 
 The system implements specialized loss functions for hyperspectral reconstruction:
 
+### **Key Architectural Difference from Standard MAE**
+
+**Important**: This implementation differs significantly from standard Masked Autoencoder approaches (like IEEE_TPAMI_SpectralGPT) in how loss is computed:
+
+- **SpectralEye_XK**: Computes loss on **ALL patches** (both masked and unmasked)
+  ```python
+  recon_loss = F.mse_loss(reconstructed, original)  # Full image reconstruction
+  ```
+
+- **Standard MAE/SpectralGPT**: Computes loss **ONLY on masked patches**
+  ```python
+  loss = (pred - target) ** 2
+  loss = (loss * mask).sum() / mask.sum()  # Only masked patches
+  ```
+
+**Implications**:
+- **Training signal**: SpectralEye_XK enforces perfect reconstruction fidelity through the encoder-decoder pipeline
+- **Representation learning**: Must maintain information for both masked prediction AND encoding fidelity
+- **Performance**: More constrained optimization compared to standard MAE self-supervised approach
+
 ### MAE Spectral Loss (`losses/mae_spectral.py`)
 Combines multiple loss components:
 - **Reconstruction MSE**: Standard pixel-wise reconstruction error

@@ -2,7 +2,7 @@
 
 defaults:
   - /config
-  - override /model: mae_medium_240
+  - override /model: mae_small_240
   - override /dataset: dataset_240
 
 # Enable DDP and trial mode
@@ -20,7 +20,7 @@ dataset:
 # Reduced training for quick test
 hparams:
   nb_epochs: 20
-  batch_size: 4
+  batch_size: 2
   lr: 0.0001
   valid_interval: 5
 

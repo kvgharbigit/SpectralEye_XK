@@ -6,12 +6,20 @@ defaults:
   - override /dataset: dataset_240
   - override /augmentation: transform_240
 
-# Optimized hyperparameters for 240x240 images
+# Optimized hyperparameters for 240x240 full training
 hparams:
-  batch_size: 10  # Can use larger batch with smaller images
+  batch_size: 8  # Optimal for mae_medium_240 on 11GB GPUs
   nb_epochs: 250
   lr: 0.0001
+  valid_interval: 10  # Validation every 10 epochs for long training
 
-# Trial mode for quick testing
+# Full dataset training
 dataset:
   trial_mode: false
+
+# Enable DDP for faster training
+general:
+  use_ddp: true
+  parallel:
+    use_parallel: true
+    device_ids: [0, 1, 2]

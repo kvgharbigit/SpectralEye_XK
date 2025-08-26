@@ -6,7 +6,7 @@ defaults:
   - metric: reconstruction_mse
   - show_prediction: plot_rgb
   - optimizer: adam
-  - scheduler: none
+  - scheduler: cosine_annealing
   - scheduler_seq: none
   - override hydra/job_logging: default
   - override hydra/hydra_logging: default

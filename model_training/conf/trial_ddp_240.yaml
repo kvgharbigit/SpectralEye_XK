@@ -4,6 +4,7 @@ defaults:
   - /config
   - override /model: mae_small_240
   - override /dataset: dataset_240
+  - override /augmentation: transform_240
 
 # Enable DDP and trial mode
 general:

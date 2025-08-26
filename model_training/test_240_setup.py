@@ -90,8 +90,8 @@ def test_forward_pass(model, img_size: int, batch_size: int = 2):
                 print(f"   Mask shape: {mask.shape}")
                 
                 # Check patch calculations
-                spatial_patches = img_size // model.spatial_patch_size[0]
-                wavelength_patches = 30 // model.wavelength_patch_size
+                spatial_patches = img_size // model.encoder.spatial_patch_size[0]
+                wavelength_patches = 30 // model.encoder.wavelength_patch_size
                 total_patches = spatial_patches * spatial_patches * wavelength_patches
                 print(f"   Spatial patches per dim: {spatial_patches}")
                 print(f"   Total patches: {total_patches}")

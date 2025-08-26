@@ -78,14 +78,14 @@ Specialized training script optimized for medium-sized models:
 
 The system implements several MAE-ViT variants optimized for hyperspectral data:
 
-| Model | Encoder Layers | Encoder Heads | Embed Dim | Decoder Layers | Decoder Heads | Parameters |
-|-------|----------------|---------------|-----------|----------------|---------------|------------|
-| mae_tiny | 12 | 3 | 192 | 8 | 3 | ~5M |
-| mae_small | 12 | 6 | 384 | 8 | 6 | ~22M |
-| **mae_base** | **12** | **12** | **768** | **8** | **12** | **~75M** |
-| mae_medium | 16 | 16 | 512 | 8 | 16 | ~86M |
-| mae_large | 24 | 16 | 1024 | 8 | 16 | ~307M |
-| mae_huge | 32 | 16 | 1280 | 8 | 16 | ~632M |
+| Model | Encoder Layers | Encoder Heads | Embed Dim | Decoder Layers | Decoder Heads | Decoder Embed Dim | Parameters |
+|-------|----------------|---------------|-----------|----------------|---------------|------------------|------------|
+| mae_tiny | 4 | 4 | 128 | 2 | 2 | 64 | ~5M |
+| mae_small | 8 | 8 | 256 | 4 | 4 | 128 | ~22M |
+| **mae_base** | **12** | **12** | **768** | **8** | **8** | **256** | **~75M** |
+| mae_medium | 16 | 16 | 512 | 8 | 8 | 256 | ~86M |
+| mae_large | 12 | 12 | 960 | 8 | 8 | 256 | ~307M |
+| mae_huge | 12 | 12 | 1200 | 8 | 8 | 320 | ~632M |
 
 ### Model Configuration
 

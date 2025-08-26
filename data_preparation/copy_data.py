@@ -20,8 +20,9 @@ def get_files(folder: Path) -> list[Path]:
     return files
 
 
-if __name__ == '__main__':
-
+def process_files(spatial_size=500):
+    """Process files with configurable spatial dimensions"""
+    
     for folder_in, folder_out in zip([CONTROL_FOLDER, AMD_FOLDER, ALZHEIMER_FOLDER,
                                       GA_FOLDER, GLAUCOMA_FOLDER,
                                       NEAVUS_FOLDER, ISCHAEMIA_FOLDER],
@@ -30,7 +31,7 @@ if __name__ == '__main__':
                                       NEAVUS_OUTPUT_FOLDER, ISCHAEMIA_OUTPUT_FOLDER]):
 
         files = get_files(folder_in)
-        print(f'Processing {folder_in}: {len(files)} files found')
+        print(f'Processing {folder_in}: {len(files)} files found (target size: {spatial_size}x{spatial_size})')
         for file in files:
 
             try:
@@ -47,7 +48,7 @@ if __name__ == '__main__':
             wl = im.wavelengths
             name = file.stem
             cube = cube[np.r_[0:58:2, 80]]
-            cube = resize(cube, (30, 500, 500))
+            cube = resize(cube, (30, spatial_size, spatial_size))
             wl = np.array(wl)[np.r_[0:58:2, 80]]
             save_folder = folder_out / file.parent.stem
             save_folder.makedirs_p()
@@ -55,4 +56,15 @@ if __name__ == '__main__':
             success = write_h5(cube=cube, wavelengths=wl, file_name=save_folder / f'{name}.h5')
             if not success:
                 print(f'-------> Error while writing {file}')
+
+
+if __name__ == '__main__':
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Process hyperspectral images with configurable spatial dimensions')
+    parser.add_argument('--spatial_size', type=int, default=500, 
+                       help='Target spatial size (default: 500 for 500x500, use 240 for 240x240)')
+    
+    args = parser.parse_args()
+    process_files(spatial_size=args.spatial_size)
 

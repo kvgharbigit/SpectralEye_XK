@@ -22,7 +22,7 @@ def get_files(folder: Path) -> list[Path]:
     return files
 
 
-def copy_all_optina_reflectance():
+def copy_all_optina_reflectance(spatial_size=500):
     for folder_in, folder_out in zip([ALL_FOLDER], [ALL_OUTPUT_FOLDER]):
 
         files = get_files(folder_in)
@@ -47,7 +47,7 @@ def copy_all_optina_reflectance():
             wl = im.wavelengths
             name = file.stem
             cube = cube[np.r_[0:58:2, 80]]
-            cube = resize(cube, (30, 500, 500))
+            cube = resize(cube, (30, spatial_size, spatial_size))
             wl = np.array(wl)[np.r_[0:58:2, 80]]
             save_folder = folder_out / file.parent.stem
             save_folder.makedirs_p()
@@ -57,7 +57,7 @@ def copy_all_optina_reflectance():
                 print(f'-------> Error while writing {file}')
 
 
-def copy_all_optina_montage():
+def copy_all_optina_montage(spatial_size=500):
     folder_in = OPTINA_MONTAGE
     folder_out = OPTINA_MONTAGE_OUTPUT
 
@@ -89,7 +89,7 @@ def copy_all_optina_montage():
             name = file.stem
 
             cube = cube[np.r_[0:58:2, 80]]
-            cube = resize(cube, (30, 500, 500))
+            cube = resize(cube, (30, spatial_size, spatial_size))
             wl = np.array(wl)[np.r_[0:58:2, 80]]
 
             save_folder = folder_out / file.parent.stem
@@ -102,7 +102,7 @@ def copy_all_optina_montage():
             print(f'\r-------> Error while processing {file}: {e}')
 
 
-def copy_all_hypercolour_reflectance():
+def copy_all_hypercolour_reflectance(spatial_size=500):
     folder_in = HYPERCOLOUR_REFLECTANCE
     folder_out = HYPERCOLOUR_REFLECTANCE_OUTPUT
 
@@ -127,7 +127,7 @@ def copy_all_hypercolour_reflectance():
         cube = im.get_cube()
         wl = im.wavelengths
         name = file.stem
-        cube = resize(cube, (30, 500, 500))
+        cube = resize(cube, (30, spatial_size, spatial_size))
         wl = np.array(wl)
         save_folder = folder_out / file.parent.stem
         save_folder.makedirs_p()
@@ -137,7 +137,7 @@ def copy_all_hypercolour_reflectance():
             print(f'-------> Error while writing {file}')
 
 
-def copy_all_hypercolour_montage():
+def copy_all_hypercolour_montage(spatial_size=500):
     folder_in = HYPERCOLOUR_MONTAGE
     folder_out = HYPERCOLOUR_MONTAGE_OUTPUT
 
@@ -162,7 +162,7 @@ def copy_all_hypercolour_montage():
         cube = im.get_cube()
         wl = im.wavelengths
         name = file.stem
-        cube = resize(cube, (30, 500, 500))
+        cube = resize(cube, (30, spatial_size, spatial_size))
         wl = np.array(wl)
         save_folder = folder_out / file.parent.stem
         save_folder.makedirs_p()

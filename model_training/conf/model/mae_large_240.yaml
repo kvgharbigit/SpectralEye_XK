@@ -1,0 +1,19 @@
+name: mae_large_240
+model:
+  _target_: model_training.models.spectral_gpt.models_mae_spectral.MaskedAutoencoderViT
+  img_size: 240
+  num_channels: 1
+  num_wavelengths: 30
+  spatial_patch_size: 12
+  wavelength_patch_size: 5
+
+  encoder_embed_dim: 960
+  encoder_depth: 12
+  encoder_num_heads: 12
+
+  decoder_embed_dim: 256
+  decoder_depth: 8
+  decoder_num_heads: 8
+
+  mlp_ratio: 4
+  mask_ratio: 0.8

@@ -42,6 +42,10 @@ general:
   pretrained_path:
   seed: 51
 
+# Spatial dimension configuration (240 or 500)
+# Override with: python train.py spatial_size=240
+spatial_size: 500
+
 mlflow:
   experiment_name: ${model.name}
   run_name: ${model.name}_${now:%Y-%m-%d}

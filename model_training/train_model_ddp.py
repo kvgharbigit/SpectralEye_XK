@@ -87,8 +87,17 @@ def generate_training_plots(csv_path: str, output_dir: str) -> None:
         if val_loss_cols:
             val_df = df[df[val_loss_cols[0]].notna()]
             if len(val_df) > 0:
-                ax1.plot(val_df['step'], val_df[val_loss_cols[0]], label='Val Loss', 
-                        marker='o', markersize=6, linewidth=2)
+                # Only show markers if validation data is sparse (not every epoch)
+                total_epochs = len(df)
+                val_epochs = len(val_df)
+                is_sparse = val_epochs < (total_epochs * 0.8)  # Less than 80% of epochs have val data
+                
+                if is_sparse:
+                    ax1.plot(val_df['step'], val_df[val_loss_cols[0]], label='Val Loss', 
+                            marker='o', markersize=6, linewidth=2)
+                else:
+                    ax1.plot(val_df['step'], val_df[val_loss_cols[0]], label='Val Loss', 
+                            linewidth=2)  # No markers for dense validation data
             else:
                 logger.debug("No validation data found in CSV")
         ax1.set_xlabel('Epoch')
@@ -110,8 +119,17 @@ def generate_training_plots(csv_path: str, output_dir: str) -> None:
         if val_metric_cols:
             val_df = df[df[val_metric_cols[0]].notna()]
             if len(val_df) > 0:
-                ax2.plot(val_df['step'], val_df[val_metric_cols[0]], label=f'Val {val_metric_cols[0].replace(" val", "")}', 
-                        marker='o', markersize=6, linewidth=2)
+                # Only show markers if validation data is sparse (not every epoch)
+                total_epochs = len(df)
+                val_epochs = len(val_df)
+                is_sparse = val_epochs < (total_epochs * 0.8)  # Less than 80% of epochs have val data
+                
+                if is_sparse:
+                    ax2.plot(val_df['step'], val_df[val_metric_cols[0]], label=f'Val {val_metric_cols[0].replace(" val", "")}', 
+                            marker='o', markersize=6, linewidth=2)
+                else:
+                    ax2.plot(val_df['step'], val_df[val_metric_cols[0]], label=f'Val {val_metric_cols[0].replace(" val", "")}', 
+                            linewidth=2)  # No markers for dense validation data
             else:
                 logger.debug("No validation metric data found in CSV")
         ax2.set_xlabel('Epoch')
@@ -590,13 +608,14 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
         if rank == 0:
             logger.info(f"Epoch {epoch} TRAIN: Loss={loss:.4f}, Metric={acc:.4f}")
 
-        # Validation epoch (if needed)
-        if epoch % cfg.hparams.valid_interval == 0:
-            train_module.model.eval()
-            with torch.no_grad():
-                val_loss, val_acc = run_one_epoch(epoch_info, train_module, dl_val, loss_fn, metric_fn, show_predictions, device, csv_path, rank)
-            if rank == 0:
-                logger.info(f"Epoch {epoch} VAL: Loss={val_loss:.4f}, Metric={val_acc:.4f}")
+        # Validation loss calculation EVERY epoch (lightweight)
+        train_module.model.eval()
+        with torch.no_grad():
+            # Always calculate validation loss but only generate images at intervals
+            show_val_predictions = show_predictions if epoch % cfg.hparams.valid_interval == 0 else None
+            val_loss, val_acc = run_one_epoch(epoch_info, train_module, dl_val, loss_fn, metric_fn, show_val_predictions, device, csv_path, rank)
+        if rank == 0:
+            logger.info(f"Epoch {epoch} VAL: Loss={val_loss:.4f}, Metric={val_acc:.4f}")
 
         # (Optional) Step the scheduler
         if hasattr(train_module, "scheduler") and train_module.scheduler:

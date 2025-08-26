@@ -104,24 +104,40 @@ The project uses Hydra for hierarchical configuration management, enabling easy 
 
 ```yaml
 defaults:
-  - dataset: segmentation_dataset
+  - dataset: combined_dataset
   - model: mae_medium
-  - loss: mae_spectral
-  - optimizer: adamw
-  - scheduler: cosine
+  - loss: custom_loss
+  - optimizer: adam
+  - scheduler: none  # Default: no scheduler
   - show_prediction: plot_rgb
 
 # Training hyperparameters
 hparams:
-  epochs: 200
-  batch_size: 6
-  valid_interval: 5
-  accumulate_grad_batches: 1
+  nb_epochs: 200
+  batch_size: 5  # Per GPU in DDP mode
+  lr: 0.0001
+  valid_interval: 5  # Model saves and detailed plots every 5 epochs
   
 # Hardware configuration  
 general:
-  device_ids: [0, 1, 2]  # Multi-GPU setup
-  num_workers: 8
+  use_amp: true  # Mixed precision enabled by default
+  parallel:
+    device_ids: [0, 1, 2]  # Multi-GPU setup
+  num_workers: 2
+```
+
+### Learning Rate Schedulers
+
+Available schedulers in `conf/scheduler/`:
+- **none** (default): Constant learning rate
+- **cosine_annealing**: Cosine decay from initial LR to 0 (SpectralGPT style)
+- **reduce_on_plateau**: Reduces LR when validation loss plateaus
+- **step_lr**: Step-wise LR reduction at specified intervals
+- **warmup**: Linear warmup scheduler
+
+Example with cosine annealing:
+```bash
+python train_model_ddp.py scheduler=cosine_annealing hparams.nb_epochs=250
 ```
 
 ### Model-Specific Configurations
@@ -371,14 +387,15 @@ The training system stores results in multiple locations depending on the traini
 
 ### 2. MLflow Experiment Tracking
 
-**Location**: `./mlruns/` directory
+**Location**: `model_training/mlruns/` directory (consistent across all training scripts)
 
 **Structure**:
 ```
-./mlruns/
-├── experiment_mapping.json  # Human-readable experiment mapping (NEW!)
+model_training/mlruns/
+├── experiment_mapping.json  # Human-readable experiment mapping
 ├── 0/                       # Experiment ID directories
 │   ├── meta.yaml           # Experiment metadata
+│   ├── experiment_info.json # Detailed experiment info with human-readable timestamps (NEW!)
 │   └── {run_id}/           # Individual run data
 │       ├── metrics/        # Metrics per epoch
 │       ├── params/         # All hyperparameters
@@ -387,19 +404,13 @@ The training system stores results in multiple locations depending on the traini
 └── 1/                      # Another experiment
 ```
 
-**New Feature - Experiment Mapping**:
-The `experiment_mapping.json` file provides human-readable experiment information:
-```json
-{
-  "0": {
-    "name": "mae_medium",
-    "model": "mae_medium", 
-    "dataset": "combined_dataset",
-    "run_name": "mae_medium_2025-08-23",
-    "last_updated": "2025-08-23T14:30:45"
-  }
-}
-```
+**Experiment Information Files**:
+1. **experiment_mapping.json**: Global mapping of all experiments
+2. **experiment_info.json**: Per-experiment detailed info with:
+   - Human-readable creation/update timestamps
+   - Full configuration details
+   - Model architecture info
+   - Training hyperparameters
 
 ### 3. Accessing Your Results
 
@@ -450,10 +461,19 @@ metrics_df = runs[['metrics.CustomLoss train', 'metrics.ReconstructionMSE train'
 
 ### 4. Metrics Logged
 
-**Training Metrics (logged every epoch)**:
-- **CustomLoss train/val**: Combined loss (reconstruction + penalties)
-- **ReconstructionMSE train/val**: Pure reconstruction error
-- **Learning Rate**: Current optimizer learning rate
+**Training Metrics**:
+- **Train metrics**: Logged every epoch
+  - Loss function value (e.g., CustomLoss, MSELoss)
+  - Metric function value (e.g., ReconstructionMSE, L1Loss)
+  - Learning Rate
+- **Validation metrics**: Now logged **every epoch** (NEW!)
+  - Lightweight validation for smooth learning curves
+  - Image generation only at validation intervals (default: every 5 epochs)
+
+**CSV Format** (Updated):
+- Single row per epoch with both train and validation columns
+- Validation columns populated every epoch (not just at intervals)
+- Example: `step,timestamp,MSELoss train,L1Loss train,Learning Rate,MSELoss val,L1Loss val`
 
 **Parameters Logged**:
 - All Hydra configuration parameters
@@ -463,9 +483,10 @@ metrics_df = runs[['metrics.CustomLoss train', 'metrics.ReconstructionMSE train'
 - Optimizer and scheduler settings
 
 **Artifacts Logged**:
-- **Training visualizations**: `{epoch:04d}_{batch:03d}_{plot_name}.png`
-- **Disease-specific plots**: RGB reconstructions per disease type
-- **Latent space visualizations**: Encoded representation plots
+- **Training visualizations**: Generated every 5 epochs
+- **Training curves**: `training_curves.png` with 4 subplots
+- **Model info**: `model_info.txt` with comprehensive training details
+- **Training summary**: `training_summary.txt` with final statistics
 
 ### 5. Key Differences: Single GPU vs DDP Output
 
@@ -478,11 +499,18 @@ metrics_df = runs[['metrics.CustomLoss train', 'metrics.ReconstructionMSE train'
 | **Process Count** | 1 process | 1 process per GPU |
 | **Metrics** | Direct | Aggregated across all GPUs |
 
-### 6. External Results Directory (Optional)
+### 6. Network Drive Backup (DDP Training)
 
-**Location**: `F:/Neavus/results_hs/{YYYY-MM-DD}_{HH-MM-SS}/`
-- Only used when `general.save_results: true` in config
-- Stores additional outputs and final results
+**Automatic copying to**: `Z:\Projects\Ophthalmic neuroscience\Projects\Kayvan\SpectralEye_XK_Outputs\{run_name}\`
+- **When**: Every 5 epochs and at training completion
+- **Files copied**:
+  - `metrics.csv` - Training metrics
+  - `model_info.txt` - Model configuration details  
+  - `training_curves.png` - Training/validation plots
+  - `training_summary.txt` - Final statistics
+  - `experiment_info.json` - Experiment metadata
+- **NOT copied**: Model checkpoints (too large, kept local only)
+- **Error handling**: Training continues if network drive unavailable
 
 ## Visualization
 

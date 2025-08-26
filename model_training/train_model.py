@@ -361,10 +361,12 @@ def run_training(cfg: DictConfig):
             loss, acc = run_one_epoch(epoch_info, train_module, dl_train, loss_fn, metric_fn, None, csv_path)
             # logger.info(f"Epoch {epoch} TRAIN: Loss = {loss:.4f}, Metric = {acc:.4f}")
 
-            if epoch % cfg.hparams.valid_interval == 0:
-                train_module.model.eval()
-                with torch.no_grad():
-                    loss_val, acc_val = run_one_epoch(epoch_info, train_module, dl_val, loss_fn, metric_fn, show_predictions, csv_path)
+            # Validation loss calculation EVERY epoch (lightweight)
+            train_module.model.eval()
+            with torch.no_grad():
+                # Always calculate validation loss but only generate images at intervals
+                show_val_predictions = show_predictions if epoch % cfg.hparams.valid_interval == 0 else None
+                loss_val, acc_val = run_one_epoch(epoch_info, train_module, dl_val, loss_fn, metric_fn, show_val_predictions, csv_path)
                 # logger.info(f"Epoch {epoch} VAL: Loss = {loss_val:.4f}, Metric = {acc_val:.4f}")
 
             if train_module.scheduler:

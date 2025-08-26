@@ -34,32 +34,53 @@ def log_metrics(metrics: dict[str, float], current_step: int, csv_path: str = No
 
 
 def log_metrics_to_csv(metrics: dict[str, float], current_step: int, csv_path: str) -> None:
-    """ Log metrics to CSV file. """
-    
-    # Prepare the row data
-    row_data = {'step': current_step, 'timestamp': datetime.now().isoformat()}
-    row_data.update(metrics)
-    
-    # Check if file exists to determine if we need headers
-    file_exists = os.path.exists(csv_path)
+    """ Log metrics to CSV file with proper train/val column handling. """
     
     # Create directory if it doesn't exist
     csv_dir = os.path.dirname(csv_path)
     if csv_dir:  # Only create if there's a directory path
         os.makedirs(csv_dir, exist_ok=True)
     
-    # Write to CSV with error handling
     try:
+        # Read existing data if file exists
+        if os.path.exists(csv_path):
+            df = pd.read_csv(csv_path)
+        else:
+            # Create new DataFrame with step column
+            df = pd.DataFrame(columns=['step'])
+        
+        # Find or create row for this step
+        if current_step in df['step'].values:
+            # Update existing row
+            idx = df[df['step'] == current_step].index[0]
+            for key, value in metrics.items():
+                df.at[idx, key] = value
+            # Update timestamp
+            df.at[idx, 'timestamp'] = datetime.now().isoformat()
+        else:
+            # Create new row
+            new_row = {'step': current_step, 'timestamp': datetime.now().isoformat()}
+            new_row.update(metrics)
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+        
+        # Sort by step to maintain order
+        df = df.sort_values('step').reset_index(drop=True)
+        
+        # Write back to CSV
+        df.to_csv(csv_path, index=False)
+            
+    except Exception as e:
+        logger.warning(f"Failed to log metrics to CSV: {e}")
+        # Fallback to old method
+        row_data = {'step': current_step, 'timestamp': datetime.now().isoformat()}
+        row_data.update(metrics)
+        file_exists = os.path.exists(csv_path)
+        
         with open(csv_path, 'a', newline='') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=row_data.keys())
-            
-            # Write header if file is new
             if not file_exists:
                 writer.writeheader()
-            
             writer.writerow(row_data)
-    except Exception as e:
-        logger.error(f"Failed to write metrics to CSV {csv_path}: {e}")
 
 def run_one_epoch(epoch_info, train_module, loader, loss_fn, metric_fn, show_predictions, device, csv_path: str = None, rank: int = 0):
     """Train or validate for one epoch using the specified device."""

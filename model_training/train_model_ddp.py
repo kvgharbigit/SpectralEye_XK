@@ -619,7 +619,11 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
 
         # (Optional) Step the scheduler
         if hasattr(train_module, "scheduler") and train_module.scheduler:
-            train_module.scheduler.step(loss)
+            # Check if scheduler is ReduceLROnPlateau which needs metric
+            if isinstance(train_module.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                train_module.scheduler.step(loss)
+            else:
+                train_module.scheduler.step()
 
         # (Optional) Save the model checkpoint at intervals (only rank 0)
         if epoch % cfg.hparams.valid_interval == 0 and cfg.general.save_model and rank == 0:

@@ -161,7 +161,7 @@ class SpecificBottleneckDiagnostic:
                     # Transfer to GPU (this is what happens in training)
                     transfer_start = time.perf_counter()
                     spectral_gpu = spectral.to(self.device, non_blocking=True)
-                    if label is not None:
+                    if label is not None and hasattr(label, 'to'):
                         label_gpu = label.to(self.device, non_blocking=True)
                     torch.cuda.synchronize()
                     transfer_time = time.perf_counter() - transfer_start
@@ -402,10 +402,15 @@ class SpecificBottleneckDiagnostic:
             # Data loading time (already measured)
             if isinstance(batch, dict):
                 spectral = batch['spectral'].to(self.device, non_blocking=True)
-                label = batch.get('label', torch.zeros_like(spectral)).to(self.device, non_blocking=True)
+                label = batch.get('label', None)
+                if label is not None and hasattr(label, 'to'):
+                    label = label.to(self.device, non_blocking=True)
             else:
                 spectral = batch[0].to(self.device, non_blocking=True)
-                label = batch[1].to(self.device, non_blocking=True) if len(batch) > 1 else torch.zeros_like(spectral).to(self.device)
+                if len(batch) > 1 and hasattr(batch[1], 'to'):
+                    label = batch[1].to(self.device, non_blocking=True)
+                else:
+                    label = None
             
             torch.cuda.synchronize()
             data_time = time.perf_counter() - batch_start

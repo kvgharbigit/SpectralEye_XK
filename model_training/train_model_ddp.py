@@ -4,6 +4,8 @@
 import os
 # Set the environment variable for libuv BEFORE any torch imports.
 os.environ["TORCH_DISTRIBUTED_USE_LIBUV"] = "0"
+# Fix OpenMP duplicate library error
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 # (Optional) Register a custom resolver for time-based interpolations.
 from omegaconf import OmegaConf
 from datetime import datetime

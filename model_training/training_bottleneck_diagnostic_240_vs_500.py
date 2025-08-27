@@ -73,16 +73,17 @@ class ComprehensiveBottleneckDiagnostic:
         print(f"\n=== TESTING {spatial_size}x{spatial_size} CONFIGURATION ===")
         
         # Create configuration for this spatial size
-        cfg = OmegaConf.copy(self.base_cfg)
+        from copy import deepcopy
+        cfg = OmegaConf.create(OmegaConf.to_yaml(self.base_cfg))
         cfg.spatial_size = spatial_size
         
         # Update model config based on spatial size
         if spatial_size == 240:
             # Load 240x240 model config
-            model_config = OmegaConf.load('model_training/conf/model/mae_medium_240.yaml')
+            model_config = OmegaConf.load('conf/model/mae_medium_240.yaml')
         else:
             # Use default 500x500 config
-            model_config = OmegaConf.load('model_training/conf/model/mae_medium.yaml')
+            model_config = OmegaConf.load('conf/model/mae_medium.yaml')
         
         # Override model config
         cfg.model = model_config

@@ -88,10 +88,10 @@ class ComprehensiveBottleneckDiagnostic:
         # Update model config based on spatial size
         if spatial_size == 240:
             # Load 240x240 model config
-            model_config = OmegaConf.load('conf/model/mae_medium_240.yaml')
+            model_config = OmegaConf.load('model_training/conf/model/mae_medium_240.yaml')
         else:
             # Use default 500x500 config
-            model_config = OmegaConf.load('conf/model/mae_medium.yaml')
+            model_config = OmegaConf.load('model_training/conf/model/mae_medium.yaml')
         
         # Override model config
         cfg.model = model_config
@@ -521,7 +521,7 @@ class ComprehensiveBottleneckDiagnostic:
         return recommendations
 
 
-@hydra.main(version_base="1.3", config_path="conf", config_name="config")
+@hydra.main(version_base="1.3", config_path="model_training/conf", config_name="config")
 def main(cfg: DictConfig):
     """Run comprehensive diagnostic comparing 240x240 vs 500x500"""
     

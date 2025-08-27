@@ -132,6 +132,9 @@ class ComprehensiveBottleneckDiagnostic:
             model_config = OmegaConf.load(config_path)
             cfg.model = model_config
             
+            # Enable DDP simulation to match production training
+            cfg.general.use_ddp = True
+            
             # Update dataset path based on spatial size
             if spatial_size == 240:
                 cfg.dataset.csv_path = cfg.dataset.csv_path.replace('data_500', 'data_240')

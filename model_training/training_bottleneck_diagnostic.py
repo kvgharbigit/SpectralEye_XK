@@ -340,9 +340,10 @@ class BottleneckDiagnostic:
                 dataset,
                 batch_size=8,
                 num_workers=num_workers,
-                pin_memory=True,
+                pin_memory=True if num_workers > 0 else False,  # Disable pin_memory for 0 workers on Windows
                 prefetch_factor=2 if num_workers > 0 else None,
-                persistent_workers=True if num_workers > 0 else False
+                persistent_workers=True if num_workers > 0 else False,
+                timeout=60 if num_workers > 0 else 0  # Add timeout to prevent hanging
             )
             
             # Warmup

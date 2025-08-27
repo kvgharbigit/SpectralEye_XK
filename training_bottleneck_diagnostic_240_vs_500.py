@@ -87,7 +87,7 @@ class ComprehensiveBottleneckDiagnostic:
             try:
                 # Quick memory test with minimal overhead
                 torch.cuda.empty_cache()
-                model_results = self.test_model_performance(cfg, batch_size, num_workers=1, quick_test=True)
+                model_results = self.test_model_performance(cfg, batch_size, num_workers=1, quick_test=False)
                 
                 if 'error' not in model_results:
                     max_batch = batch_size
@@ -139,6 +139,7 @@ class ComprehensiveBottleneckDiagnostic:
                 cfg.dataset.csv_path = cfg.dataset.csv_path.replace('data_240', 'data_500')
             
             self.log_both(f"Model config: {cfg.model.name}")
+            self.log_both(f"Dataset path: {cfg.dataset.csv_path}")
             self.log_both(f"Image size: {cfg.model.model.img_size}")
             self.log_both(f"Spatial patch size: {cfg.model.model.spatial_patch_size}")
             self.log_both(f"Wavelength patches: {cfg.model.model.num_wavelengths}")
@@ -155,7 +156,8 @@ class ComprehensiveBottleneckDiagnostic:
             
             # Test all permutations for this model
             self.log_both(f"\n=== MODEL PERFORMANCE TESTING ({spatial_size}x{spatial_size}) - {model_name.upper()} - ALL CONFIGURATIONS ===")
-            self.log_both(f"Testing batch sizes: {batch_sizes}")
+            self.log_both(f"DDP Mode: {'3-GPU simulation' if cfg.general.use_ddp else 'Single GPU'}")
+            self.log_both(f"Testing batch sizes: {batch_sizes} (per-GPU)")
             self.log_both(f"{'Config':<20} {'Data Load':<12} {'Model FWD':<12} {'Model BWD':<12} {'GPU Util':<10} {'Memory':<10} {'Training/s':<12} {'Epoch(34k)':<12}")
             self.log_both("-" * 112)
         
@@ -190,8 +192,11 @@ class ComprehensiveBottleneckDiagnostic:
                             memory_gb = model_results.get('memory_gb', 0)
                             
                             # Calculate overall training throughput (samples per second in training)
+                            # For DDP: use effective global batch size for throughput calculation
+                            effective_batch = batch_size * 3 if cfg.general.use_ddp else batch_size
+                            
                             if model_results.get('training_step_time_ms', 0) > 0:
-                                training_samples_per_sec = (batch_size * 1000) / model_results['training_step_time_ms']
+                                training_samples_per_sec = (effective_batch * 1000) / model_results['training_step_time_ms']
                                 # Calculate epoch time for 34k dataset
                                 epoch_seconds = 34000 / training_samples_per_sec
                                 epoch_minutes = epoch_seconds / 60
@@ -223,9 +228,14 @@ class ComprehensiveBottleneckDiagnostic:
         return all_results
         
     def test_model_performance(self, cfg: DictConfig, batch_size: int, num_workers: int, quick_test: bool = False) -> Dict:
-        """Test actual model performance with given configuration"""
+        """Test actual model performance with given configuration - DDP simulation"""
         
-        device = torch.device('cuda:1')  # Your configured device
+        # Simulate DDP with 3 GPUs: batch_size is PER-GPU batch size
+        # Effective global batch size = batch_size * 3
+        effective_global_batch = batch_size * 3 if cfg.general.use_ddp else batch_size
+        
+        # Use GPU 1 for testing (simulating one of the 3 DDP processes)
+        device = torch.device('cuda:1')
         
         try:
             # Clear GPU cache before testing
@@ -262,10 +272,11 @@ class ComprehensiveBottleneckDiagnostic:
             img_size = cfg.model.model.img_size
             
             if not quick_test:
-                print(f"DEBUG - Setting up real data pipeline:")
+                print(f"DEBUG - Setting up real data pipeline (DDP simulation):")
                 print(f"  Loading from: {cfg.dataset.csv_path}")
                 print(f"  Image size: {img_size}")
-                print(f"  Batch size: {batch_size}")
+                print(f"  Per-GPU batch size: {batch_size}")
+                print(f"  Effective global batch: {effective_global_batch} ({batch_size} x 3 GPUs)")
                 print(f"  Workers: {num_workers}")
             
             # Import actual dataset and preprocessing
@@ -282,15 +293,34 @@ class ComprehensiveBottleneckDiagnostic:
                 transform=None    # Skip augmentations for cleaner benchmarking
             )
             
-            # Create real DataLoader with actual configuration
+            # Create real DataLoader with DDP-aware configuration
+            from torch.utils.data.distributed import DistributedSampler
+            
+            # Simulate DistributedSampler for DDP (each GPU sees 1/3 of data)
+            if cfg.general.use_ddp:
+                # Simulate being rank 1 of 3 processes
+                sampler = DistributedSampler(
+                    train_dataset, 
+                    num_replicas=3,  # 3 GPUs
+                    rank=1,          # Simulate being GPU 1
+                    shuffle=False    # Consistent for benchmarking
+                )
+                shuffle = False
+                pin_memory = False  # Disabled in DDP per config
+            else:
+                sampler = None
+                shuffle = False
+                pin_memory = True
+            
             dataloader = torch.utils.data.DataLoader(
                 train_dataset,
-                batch_size=batch_size,
+                batch_size=batch_size,  # Per-GPU batch size
                 num_workers=num_workers,
-                pin_memory=True,
+                pin_memory=pin_memory,
                 prefetch_factor=2 if num_workers > 0 else None,
                 persistent_workers=num_workers > 1,
-                shuffle=False,    # Disable shuffle for consistent timing
+                shuffle=shuffle,
+                sampler=sampler,
                 timeout=60 if num_workers > 0 else 0
             )
             

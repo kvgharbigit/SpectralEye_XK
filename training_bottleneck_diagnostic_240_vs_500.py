@@ -242,9 +242,9 @@ class ComprehensiveBottleneckDiagnostic:
         # Now test model performance with optimal data loading configs
         self.log_both(f"\n=== MODEL PERFORMANCE TESTING ({spatial_size}x{spatial_size}) ===")
         
-        # Test top 3 data loading configs with actual model
+        # Test ALL data loading configs with actual model (not just top 3)
         sorted_configs = sorted([k for k, v in results.items() if v.get('samples_per_sec', 0) > 0], 
-                               key=lambda k: results[k]['samples_per_sec'], reverse=True)[:3]
+                               key=lambda k: results[k]['samples_per_sec'], reverse=True)
         
         self.log_both(f"{'Config':<20} {'Data Rate':<12} {'Model FWD':<12} {'Model BWD':<12} {'GPU Util':<10} {'Memory':<10} {'Overall':<12}")
         self.log_both("-" * 100)

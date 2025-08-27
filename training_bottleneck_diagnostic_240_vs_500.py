@@ -250,7 +250,8 @@ class ComprehensiveBottleneckDiagnostic:
             num_workers = config_result['num_workers']
             
             try:
-                # Test model performance
+                # Test model performance with memory error handling
+                self.log_both(f"  Testing model performance for {config_key}...")
                 model_results = self.test_model_performance(cfg, batch_size, num_workers)
                 
                 # Update results
@@ -286,8 +287,16 @@ class ComprehensiveBottleneckDiagnostic:
         
         device = torch.device('cuda:1')  # Your configured device
         
-        # Create model
-        model = MaskedAutoencoderViT(
+        try:
+            # Clear GPU cache before testing
+            torch.cuda.empty_cache()
+            
+            # Get initial memory state
+            memory_reserved_start = torch.cuda.memory_reserved(device) / 1e9
+            memory_allocated_start = torch.cuda.memory_allocated(device) / 1e9
+            
+            # Create model
+            model = MaskedAutoencoderViT(
             img_size=cfg.model.model.img_size,
             num_channels=cfg.model.model.num_channels,
             num_wavelengths=cfg.model.model.num_wavelengths,
@@ -396,13 +405,60 @@ class ComprehensiveBottleneckDiagnostic:
         end_metrics = self.get_gpu_metrics(device.index if hasattr(device, 'index') else 1)
         avg_training_time = np.mean(training_times)
         
-        return {
-            'forward_time_ms': avg_forward_time,
-            'training_step_time_ms': avg_training_time,
-            'gpu_util': end_metrics.get('gpu_util', 0),
-            'memory_gb': end_metrics.get('memory_used_gb', 0),
-            'power_w': end_metrics.get('power_w', 0)
-        }
+            return {
+                'forward_time_ms': avg_forward_time,
+                'training_step_time_ms': avg_training_time,
+                'gpu_util': end_metrics.get('gpu_util', 0),
+                'memory_gb': end_metrics.get('memory_used_gb', 0),
+                'power_w': end_metrics.get('power_w', 0)
+            }
+            
+        except torch.cuda.OutOfMemoryError as e:
+            torch.cuda.empty_cache()  # Clear cache after OOM
+            print(f"  GPU OUT OF MEMORY: batch_size={batch_size}, spatial_size={cfg.model.model.img_size}")
+            return {
+                'error': 'CUDA_OOM',
+                'error_msg': f'GPU out of memory with batch_size={batch_size}',
+                'forward_time_ms': 0,
+                'training_step_time_ms': 0,
+                'gpu_util': 0,
+                'memory_gb': 0
+            }
+            
+        except RuntimeError as e:
+            if "out of memory" in str(e).lower():
+                torch.cuda.empty_cache()
+                print(f"  GPU MEMORY ERROR: {str(e)[:100]}...")
+                return {
+                    'error': 'CUDA_MEMORY_ERROR',
+                    'error_msg': str(e)[:200],
+                    'forward_time_ms': 0,
+                    'training_step_time_ms': 0,
+                    'gpu_util': 0,
+                    'memory_gb': 0
+                }
+            else:
+                # Other runtime errors (dimension mismatches, etc.)
+                print(f"  MODEL ERROR: {str(e)[:100]}...")
+                return {
+                    'error': 'MODEL_ERROR',
+                    'error_msg': str(e)[:200],
+                    'forward_time_ms': 0,
+                    'training_step_time_ms': 0,
+                    'gpu_util': 0,
+                    'memory_gb': 0
+                }
+                
+        except Exception as e:
+            print(f"  UNEXPECTED ERROR: {str(e)[:100]}...")
+            return {
+                'error': 'UNKNOWN_ERROR',
+                'error_msg': str(e)[:200],
+                'forward_time_ms': 0,
+                'training_step_time_ms': 0,
+                'gpu_util': 0,
+                'memory_gb': 0
+            }
         
     def compare_configurations(self) -> Dict:
         """Compare 240x240 vs 500x500 configurations"""

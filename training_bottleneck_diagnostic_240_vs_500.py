@@ -335,9 +335,9 @@ class ComprehensiveBottleneckDiagnostic:
             print(f"  expected_channels: {expected_channels}")
             print(f"  creating tensor shape: [{batch_size}, 1, {expected_channels}, {img_size}, {img_size}]")
             
-            # Model expects: [batch_size, channels, wavelengths, height, width]
-            # For spectral data: channels=1, wavelengths=30, spatial=240x240
-            x = torch.randn(batch_size, 1, expected_channels, img_size, img_size, device=device)
+            # Model expects: [batch_size, wavelengths, height, width] 
+            # (unsqueeze(dim=1) is called inside the encoder)
+            x = torch.randn(batch_size, expected_channels, img_size, img_size, device=device)
             
             model.eval()
             

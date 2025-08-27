@@ -349,7 +349,11 @@ class ComprehensiveBottleneckDiagnostic:
                     try:
                         print(f"  Warmup {i+1}/3...")
                         output = model(x)
-                        print(f"  Success! Output shape: {output.shape}")
+                    # Model returns (loss, pred, mask) tuple
+                        if isinstance(output, tuple):
+                            print(f"  Success! Output tuple with {len(output)} elements")
+                        else:
+                            print(f"  Success! Output shape: {output.shape}")
                     except Exception as e:
                         print(f"  Forward pass failed: {str(e)}")
                         return {'error': f'Forward pass failed: {str(e)}'}
@@ -360,6 +364,7 @@ class ComprehensiveBottleneckDiagnostic:
                 for _ in range(10):
                     start_time = time.perf_counter()
                     output = model(x)
+                    # Model returns (loss, pred, mask) tuple
                     torch.cuda.synchronize()
                     forward_times.append((time.perf_counter() - start_time) * 1000)
             
@@ -386,6 +391,7 @@ class ComprehensiveBottleneckDiagnostic:
                     if cfg.general.use_amp:
                         with torch.cuda.amp.autocast():
                             output = model(x)
+                    # Model returns (loss, pred, mask) tuple
                             loss = loss_fn(output, x)
                         
                         scaler.scale(loss).backward()
@@ -393,6 +399,7 @@ class ComprehensiveBottleneckDiagnostic:
                         scaler.update()
                     else:
                         output = model(x)
+                    # Model returns (loss, pred, mask) tuple
                         loss = loss_fn(output, x)
                         loss.backward()
                         optimizer.step()

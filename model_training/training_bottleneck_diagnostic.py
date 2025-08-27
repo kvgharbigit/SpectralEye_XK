@@ -10,6 +10,10 @@ This script analyzes various aspects of your training pipeline to identify bottl
 - Model computation efficiency
 """
 
+import os
+# Fix OpenMP error on Windows
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+
 import torch
 import torch.nn as nn
 import torch.utils.data

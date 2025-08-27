@@ -8,6 +8,14 @@ This script specifically tests your exact training configuration to identify bot
 import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
+import sys
+from pathlib import Path
+
+# Add parent directory to path so we can import model_training
+current_dir = Path(__file__).parent
+parent_dir = current_dir.parent
+sys.path.insert(0, str(parent_dir))
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -15,7 +23,6 @@ import time
 import psutil
 import pynvml
 import matplotlib.pyplot as plt
-from pathlib import Path
 from datetime import datetime
 import json
 import hydra

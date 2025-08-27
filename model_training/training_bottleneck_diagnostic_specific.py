@@ -559,7 +559,7 @@ class SpecificBottleneckDiagnostic:
         return bottlenecks if bottlenecks else ["No major bottlenecks identified"]
 
 
-@hydra.main(version_base="1.3", config_path="conf", config_name="config")
+@hydra.main(version_base="1.3", config_path="model_training/conf", config_name="config")
 def main(cfg: DictConfig):
     """Run specific diagnostic with your training configuration"""
     

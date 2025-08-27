@@ -213,8 +213,12 @@ class SpecificBottleneckDiagnostic:
         
         # Use DataParallel if configured
         if self.cfg.general.parallel.use_parallel:
+            # For DataParallel, model must be on device 0 first
+            model = model.to('cuda:0')
             model = nn.DataParallel(model, device_ids=self.cfg.general.parallel.device_ids)
             print(f"Using DataParallel on devices: {self.cfg.general.parallel.device_ids}")
+            # Update device for input tensors
+            self.device = torch.device('cuda:0')
             
         model.eval()
         
@@ -370,7 +374,12 @@ class SpecificBottleneckDiagnostic:
         ).to(self.device)
         
         if self.cfg.general.parallel.use_parallel:
+            # For DataParallel, model must be on device 0 first
+            model = model.to('cuda:0')
             model = nn.DataParallel(model, device_ids=self.cfg.general.parallel.device_ids)
+            # Update device for tensors
+            original_device = self.device
+            self.device = torch.device('cuda:0')
             
         optimizer = torch.optim.AdamW(model.parameters(), lr=self.cfg.hparams.lr)
         loss_fn = CustomLoss(

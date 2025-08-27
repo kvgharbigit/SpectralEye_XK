@@ -365,6 +365,7 @@ class ComprehensiveBottleneckDiagnostic:
                     forward_times.append((time.perf_counter() - start_time) * 1000)
             
             avg_forward_time = np.mean(forward_times)
+            print(f"  Forward pass completed: {len(forward_times)} runs, avg time: {avg_forward_time:.1f}ms")
             
             # Test training step
             model.train()
@@ -411,12 +412,15 @@ class ComprehensiveBottleneckDiagnostic:
                     training_times.append((time.perf_counter() - start_time) * 1000)
                     
                 except Exception as e:
+                    print(f"  Training step failed: {str(e)}")
                     return {'error': f'Training step failed: {str(e)}'}
             
             # Get device index safely
             device_idx = getattr(device, 'index', 0) if hasattr(device, 'index') else 0
             end_metrics = self.get_gpu_metrics(device_idx)
             avg_training_time = np.mean(training_times)
+            
+            print(f"  Training completed: {len(training_times)} steps, avg time: {avg_training_time:.1f}ms")
             
             return {
                 'forward_time_ms': avg_forward_time,

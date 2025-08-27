@@ -329,8 +329,8 @@ class ComprehensiveBottleneckDiagnostic:
             print(f"  spatial_patch_size: {cfg.model.model.spatial_patch_size}")
             
             # For spectral data: [B, H, W, Wavelengths]
-            # Based on your model config, it expects wavelength_patch_size * num_wavelengths channels
-            expected_channels = cfg.model.model.wavelength_patch_size * cfg.model.model.num_wavelengths
+            # The model expects num_wavelengths channels (patching happens inside the model)
+            expected_channels = cfg.model.model.num_wavelengths
             
             print(f"  expected_channels: {expected_channels}")
             print(f"  creating tensor shape: [{batch_size}, {img_size}, {img_size}, {expected_channels}]")

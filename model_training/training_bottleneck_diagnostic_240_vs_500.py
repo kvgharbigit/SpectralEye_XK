@@ -221,7 +221,7 @@ class ComprehensiveBottleneckDiagnostic:
                     else:
                         status = "GOOD"
                     
-                    print(f"{num_workers:<8} {batch_size:<6} {samples_per_sec:<12.0f} {avg_batch_time*1000:<12.1f} {io_overhead_pct:<8.1f} {status:<15}")
+                    self.log_both(f"{num_workers:<8} {batch_size:<6} {samples_per_sec:<12.0f} {avg_batch_time*1000:<12.1f} {io_overhead_pct:<8.1f} {status:<15}")
                     
                 except Exception as e:
                     results[config_key] = {
@@ -229,20 +229,20 @@ class ComprehensiveBottleneckDiagnostic:
                         'status': f'ERROR: {str(e)[:20]}',
                         'samples_per_sec': 0
                     }
-                    print(f"{num_workers:<8} {batch_size:<6} {'ERROR':<12} {str(e)[:30]:<30}")
+                    self.log_both(f"{num_workers:<8} {batch_size:<6} {'ERROR':<12} {str(e)[:30]:<30}")
                     continue
         
-        print(f"\nBest data loading config: {best_data_config} ({best_data_throughput:.0f} samples/sec)")
+        self.log_both(f"\nBest data loading config: {best_data_config} ({best_data_throughput:.0f} samples/sec)")
         
         # Now test model performance with optimal data loading configs
-        print(f"\n=== MODEL PERFORMANCE TESTING ({spatial_size}x{spatial_size}) ===")
+        self.log_both(f"\n=== MODEL PERFORMANCE TESTING ({spatial_size}x{spatial_size}) ===")
         
         # Test top 3 data loading configs with actual model
         sorted_configs = sorted([k for k, v in results.items() if v.get('samples_per_sec', 0) > 0], 
                                key=lambda k: results[k]['samples_per_sec'], reverse=True)[:3]
         
-        print(f"{'Config':<20} {'Data Rate':<12} {'Model FWD':<12} {'Model BWD':<12} {'GPU Util':<10} {'Memory':<10} {'Overall':<12}")
-        print("-" * 100)
+        self.log_both(f"{'Config':<20} {'Data Rate':<12} {'Model FWD':<12} {'Model BWD':<12} {'GPU Util':<10} {'Memory':<10} {'Overall':<12}")
+        self.log_both("-" * 100)
         
         for config_key in sorted_configs:
             config_result = results[config_key]
@@ -271,12 +271,12 @@ class ComprehensiveBottleneckDiagnostic:
                     else:
                         training_samples_per_sec = 0
                     
-                    print(f"{config_display:<20} {data_rate:<12.0f} {fwd_time:<12.1f} {bwd_time:<12.1f} {gpu_util:<10.1f} {memory_gb:<10.1f} {training_samples_per_sec:<12.1f}")
+                    self.log_both(f"{config_display:<20} {data_rate:<12.0f} {fwd_time:<12.1f} {bwd_time:<12.1f} {gpu_util:<10.1f} {memory_gb:<10.1f} {training_samples_per_sec:<12.1f}")
                 else:
-                    print(f"{config_display:<20} {data_rate:<12.0f} {'ERROR':<12} {'ERROR':<12} {'ERROR':<10} {'ERROR':<10} {'ERROR':<12}")
+                    self.log_both(f"{config_display:<20} {data_rate:<12.0f} {'ERROR':<12} {'ERROR':<12} {'ERROR':<10} {'ERROR':<10} {'ERROR':<12}")
                     
             except Exception as e:
-                print(f"{config_key:<20} {'ERROR':<50} {str(e)[:30]}")
+                self.log_both(f"{config_key:<20} {'ERROR':<50} {str(e)[:30]}")
                 results[config_key]['model_error'] = str(e)
         
         return results
@@ -426,17 +426,17 @@ class ComprehensiveBottleneckDiagnostic:
             best_config_key = max(successful_configs.keys(), key=get_training_throughput)
             best_config = successful_configs[best_config_key]
             
-            print(f"\n=== OVERALL BEST CONFIGURATION ===")
-            print(f"Configuration: {best_config_key}")
-            print(f"Spatial size: {best_config['spatial_size']}x{best_config['spatial_size']}")
-            print(f"Workers: {best_config['num_workers']}")
-            print(f"Batch size: {best_config['batch_size']}")
-            print(f"Data loading: {best_config['samples_per_sec']:.0f} samples/sec")
-            print(f"Forward pass: {best_config.get('forward_time_ms', 0):.1f}ms")
-            print(f"Training step: {best_config.get('training_step_time_ms', 0):.1f}ms")
-            print(f"Training throughput: {get_training_throughput(best_config_key):.1f} samples/sec")
-            print(f"GPU utilization: {best_config.get('gpu_util', 0):.1f}%")
-            print(f"Memory usage: {best_config.get('memory_gb', 0):.1f}GB")
+            self.log_both(f"\n=== OVERALL BEST CONFIGURATION ===")
+            self.log_both(f"Configuration: {best_config_key}")
+            self.log_both(f"Spatial size: {best_config['spatial_size']}x{best_config['spatial_size']}")
+            self.log_both(f"Workers: {best_config['num_workers']}")
+            self.log_both(f"Batch size: {best_config['batch_size']}")
+            self.log_both(f"Data loading: {best_config['samples_per_sec']:.0f} samples/sec")
+            self.log_both(f"Forward pass: {best_config.get('forward_time_ms', 0):.1f}ms")
+            self.log_both(f"Training step: {best_config.get('training_step_time_ms', 0):.1f}ms")
+            self.log_both(f"Training throughput: {get_training_throughput(best_config_key):.1f} samples/sec")
+            self.log_both(f"GPU utilization: {best_config.get('gpu_util', 0):.1f}%")
+            self.log_both(f"Memory usage: {best_config.get('memory_gb', 0):.1f}GB")
             
             # Compare with current configuration
             current_key = f"{self.base_cfg.spatial_size}x{self.base_cfg.spatial_size}_w{self.base_cfg.dataloader.num_workers}_b{self.base_cfg.hparams.batch_size}"
@@ -447,11 +447,16 @@ class ComprehensiveBottleneckDiagnostic:
                 
                 improvement = (best_throughput / current_throughput - 1) * 100 if current_throughput > 0 else 0
                 
-                print(f"\n=== COMPARISON WITH CURRENT CONFIG ===")
-                print(f"Current: {current_throughput:.1f} samples/sec")
-                print(f"Optimal: {best_throughput:.1f} samples/sec")
-                print(f"Potential speedup: {improvement:.1f}%")
+                self.log_both(f"\n=== COMPARISON WITH CURRENT CONFIG ===")
+                self.log_both(f"Current: {current_throughput:.1f} samples/sec")
+                self.log_both(f"Optimal: {best_throughput:.1f} samples/sec")
+                self.log_both(f"Potential speedup: {improvement:.1f}%")
             
+        # Close text file
+        if self.text_file:
+            self.log_both(f"\nCompleted at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            self.text_file.close()
+        
         return {
             'results_240': results_240,
             'results_500': results_500,
@@ -522,6 +527,8 @@ def main(cfg: DictConfig):
     
     # Save results
     report_path = diag.output_dir / f'comprehensive_comparison_{diag.timestamp}.json'
+    text_report_path = diag.output_dir / f'diagnostic_report_{diag.timestamp}.txt'
+    
     with open(report_path, 'w') as f:
         json.dump(results, f, indent=2, default=str)
     
@@ -529,7 +536,9 @@ def main(cfg: DictConfig):
     for rec in results['summary']:
         print(f"• {rec}")
     
-    print(f"\nDetailed results saved to: {report_path}")
+    print(f"\n=== RESULTS SAVED ===")
+    print(f"Text report: {text_report_path}")
+    print(f"JSON data: {report_path}")
     
     return results
 

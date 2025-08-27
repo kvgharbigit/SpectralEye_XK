@@ -109,40 +109,6 @@ class ComprehensiveBottleneckDiagnostic:
         best_data_config = None
         best_data_throughput = 0
         
-        # MOVED: Test model performance first for faster debugging
-        self.log_both(f"\n=== MODEL PERFORMANCE TESTING ({spatial_size}x{spatial_size}) ===")
-        self.log_both(f"{'Config':<20} {'Data Rate':<12} {'Model FWD':<12} {'Model BWD':<12} {'GPU Util':<10} {'Memory':<10} {'Overall':<12}")
-        self.log_both("-" * 100)
-        
-        # Test a few representative configs for model performance
-        test_configs = [
-            (2, 6),  # 2 workers, batch 6
-            (4, 6),  # 4 workers, batch 6  
-            (1, 6),  # 1 worker, batch 6
-        ]
-        
-        for num_workers, batch_size in test_configs:
-            config_key = f"{spatial_size}x{spatial_size}_w{num_workers}_b{batch_size}"
-            self.log_both(f"  Testing model performance for {config_key}...")
-            model_results = self.test_model_performance(cfg, batch_size, num_workers)
-            
-            if 'error' not in model_results:
-                data_rate = 0  # Will be filled by data loading test later
-                fwd_time = model_results.get('forward_time_ms', 0)
-                bwd_time = model_results.get('training_step_time_ms', 0) - fwd_time
-                gpu_util = model_results.get('gpu_util', 0)
-                memory = model_results.get('memory_gb', 0)
-                
-                if model_results.get('training_step_time_ms', 0) > 0:
-                    training_samples_per_sec = (batch_size * 1000) / model_results['training_step_time_ms']
-                    overall = f"{training_samples_per_sec:.0f}/s"
-                else:
-                    overall = "ERROR"
-                
-                self.log_both(f"{config_key:<20} {'TBD':<12} {fwd_time:<12.1f} {bwd_time:<12.1f} {gpu_util:<10.0f} {memory:<10.1f} {overall:<12}")
-            else:
-                self.log_both(f"{config_key:<20} {'TBD':<12} {'ERROR':<12} {'ERROR':<12} {'ERROR':<10} {'ERROR':<10} {'ERROR':<12}")
-        
         self.log_both(f"\n=== DATA LOADING PERFORMANCE ({spatial_size}x{spatial_size}) ===")
         self.log_both(f"{'Workers':<8} {'Batch':<6} {'Samples/s':<12} {'Batch Time':<12} {'I/O %':<8} {'Status':<15}")
         self.log_both("-" * 75)
@@ -273,8 +239,51 @@ class ComprehensiveBottleneckDiagnostic:
         
         self.log_both(f"\nBest data loading config: {best_data_config} ({best_data_throughput:.0f} samples/sec)")
         
-        # Model testing was moved to the beginning for faster debugging
-        self.log_both(f"\n=== MODEL TESTING COMPLETED ABOVE ===")
+        # Now test model performance with optimal data loading configs
+        self.log_both(f"\n=== MODEL PERFORMANCE TESTING ({spatial_size}x{spatial_size}) ===")
+        
+        # Test top 3 data loading configs with actual model
+        sorted_configs = sorted([k for k, v in results.items() if v.get('samples_per_sec', 0) > 0], 
+                               key=lambda k: results[k]['samples_per_sec'], reverse=True)[:3]
+        
+        self.log_both(f"{'Config':<20} {'Data Rate':<12} {'Model FWD':<12} {'Model BWD':<12} {'GPU Util':<10} {'Memory':<10} {'Overall':<12}")
+        self.log_both("-" * 100)
+        
+        for config_key in sorted_configs:
+            config_result = results[config_key]
+            batch_size = config_result['batch_size']
+            num_workers = config_result['num_workers']
+            
+            try:
+                # Test model performance with memory error handling
+                self.log_both(f"  Testing model performance for {config_key}...")
+                model_results = self.test_model_performance(cfg, batch_size, num_workers)
+                
+                # Update results
+                results[config_key].update(model_results)
+                
+                config_display = f"w{num_workers}_b{batch_size}"
+                data_rate = config_result['samples_per_sec']
+                
+                if 'forward_time_ms' in model_results:
+                    fwd_time = model_results['forward_time_ms']
+                    bwd_time = model_results.get('training_step_time_ms', 0) - fwd_time
+                    gpu_util = model_results.get('gpu_util', 0)
+                    memory_gb = model_results.get('memory_gb', 0)
+                    
+                    # Calculate overall training throughput (samples per second in training)
+                    if model_results.get('training_step_time_ms', 0) > 0:
+                        training_samples_per_sec = (batch_size * 1000) / model_results['training_step_time_ms']
+                    else:
+                        training_samples_per_sec = 0
+                    
+                    self.log_both(f"{config_display:<20} {data_rate:<12.0f} {fwd_time:<12.1f} {bwd_time:<12.1f} {gpu_util:<10.1f} {memory_gb:<10.1f} {training_samples_per_sec:<12.1f}")
+                else:
+                    self.log_both(f"{config_display:<20} {data_rate:<12.0f} {'ERROR':<12} {'ERROR':<12} {'ERROR':<10} {'ERROR':<10} {'ERROR':<12}")
+                    
+            except Exception as e:
+                self.log_both(f"{config_key:<20} {'ERROR':<50} {str(e)[:30]}")
+                results[config_key]['model_error'] = str(e)
         
         return results
         

@@ -297,23 +297,23 @@ class ComprehensiveBottleneckDiagnostic:
             
             # Create model
             model = MaskedAutoencoderViT(
-            img_size=cfg.model.model.img_size,
-            num_channels=cfg.model.model.num_channels,
-            num_wavelengths=cfg.model.model.num_wavelengths,
-            spatial_patch_size=cfg.model.model.spatial_patch_size,
-            wavelength_patch_size=cfg.model.model.wavelength_patch_size,
-            encoder_embed_dim=cfg.model.model.encoder_embed_dim,
-            encoder_depth=cfg.model.model.encoder_depth,
-            encoder_num_heads=cfg.model.model.encoder_num_heads,
-            decoder_embed_dim=cfg.model.model.decoder_embed_dim,
-            decoder_depth=cfg.model.model.decoder_depth,
-            decoder_num_heads=cfg.model.model.decoder_num_heads,
-            mlp_ratio=cfg.model.model.mlp_ratio,
-            mask_ratio=cfg.model.model.mask_ratio
-        ).to(device)
-        
-        # Use DataParallel if configured
-        if cfg.general.parallel.use_parallel:
+                img_size=cfg.model.model.img_size,
+                num_channels=cfg.model.model.num_channels,
+                num_wavelengths=cfg.model.model.num_wavelengths,
+                spatial_patch_size=cfg.model.model.spatial_patch_size,
+                wavelength_patch_size=cfg.model.model.wavelength_patch_size,
+                encoder_embed_dim=cfg.model.model.encoder_embed_dim,
+                encoder_depth=cfg.model.model.encoder_depth,
+                encoder_num_heads=cfg.model.model.encoder_num_heads,
+                decoder_embed_dim=cfg.model.model.decoder_embed_dim,
+                decoder_depth=cfg.model.model.decoder_depth,
+                decoder_num_heads=cfg.model.model.decoder_num_heads,
+                mlp_ratio=cfg.model.model.mlp_ratio,
+                mask_ratio=cfg.model.model.mask_ratio
+            ).to(device)
+            
+            # Use DataParallel if configured
+            if cfg.general.parallel.use_parallel:
             model = model.to('cuda:0')
             model = nn.DataParallel(model, device_ids=cfg.general.parallel.device_ids)
             device = torch.device('cuda:0')

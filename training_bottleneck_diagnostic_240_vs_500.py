@@ -162,7 +162,11 @@ class ComprehensiveBottleneckDiagnostic:
                             break
                     
                     # Benchmark data loading
-                    device = torch.device('cuda:1')  # Use your configured device
+                    # Use available GPU device
+                    if torch.cuda.device_count() > 1:
+                        device = torch.device('cuda:1')
+                    else:
+                        device = torch.device('cuda:0')
                     num_batches = min(15, len(dataloader))
                     batch_times = []
                     io_times = []
@@ -195,8 +199,9 @@ class ComprehensiveBottleneckDiagnostic:
                     # Calculate metrics
                     avg_batch_time = np.mean(batch_times)
                     avg_io_time = np.mean(io_times)
-                    samples_per_sec = (num_batches * batch_size) / sum(batch_times)
-                    io_overhead_pct = (avg_io_time / avg_batch_time) * 100
+                    total_time = sum(batch_times)
+                    samples_per_sec = (num_batches * batch_size) / total_time if total_time > 0 else 0
+                    io_overhead_pct = (avg_io_time / avg_batch_time) * 100 if avg_batch_time > 0 else 0
                     
                     results[config_key] = {
                         'spatial_size': spatial_size,
@@ -391,16 +396,20 @@ class ComprehensiveBottleneckDiagnostic:
                     if cfg.general.use_amp:
                         with torch.cuda.amp.autocast():
                             output = model(x)
-                    # Model returns (loss, pred, mask) tuple
-                            loss = loss_fn(output, x)
+                            # Model returns (loss, pred, mask) tuple
+                            loss_val, pred, mask = output
+                            # Use model's internal loss instead of external loss function
+                            loss = loss_val
                         
                         scaler.scale(loss).backward()
                         scaler.step(optimizer)
                         scaler.update()
                     else:
                         output = model(x)
-                    # Model returns (loss, pred, mask) tuple
-                        loss = loss_fn(output, x)
+                        # Model returns (loss, pred, mask) tuple
+                        loss_val, pred, mask = output
+                        # Use model's internal loss instead of external loss function
+                        loss = loss_val
                         loss.backward()
                         optimizer.step()
                     

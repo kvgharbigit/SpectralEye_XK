@@ -132,6 +132,12 @@ class ComprehensiveBottleneckDiagnostic:
             model_config = OmegaConf.load(config_path)
             cfg.model = model_config
             
+            # Update dataset path based on spatial size
+            if spatial_size == 240:
+                cfg.dataset.csv_path = cfg.dataset.csv_path.replace('data_500', 'data_240')
+            else:
+                cfg.dataset.csv_path = cfg.dataset.csv_path.replace('data_240', 'data_500')
+            
             self.log_both(f"Model config: {cfg.model.name}")
             self.log_both(f"Image size: {cfg.model.model.img_size}")
             self.log_both(f"Spatial patch size: {cfg.model.model.spatial_patch_size}")

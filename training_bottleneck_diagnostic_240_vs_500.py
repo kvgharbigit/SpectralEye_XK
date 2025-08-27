@@ -40,7 +40,7 @@ class ComprehensiveBottleneckDiagnostic:
     
     def __init__(self, base_cfg: DictConfig):
         self.base_cfg = base_cfg
-        self.output_dir = Path('comprehensive_diagnostic_results')
+        self.output_dir = Path('comprehensive_diagnostic_results')  # Results in same directory as script
         self.output_dir.mkdir(exist_ok=True)
         self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
@@ -312,9 +312,19 @@ class ComprehensiveBottleneckDiagnostic:
         # Create input tensor with correct dimensions
         img_size = cfg.model.model.img_size
         
+        # Debug: print model expectations
+        print(f"DEBUG - Model expects:")
+        print(f"  img_size: {img_size}")
+        print(f"  num_wavelengths: {cfg.model.model.num_wavelengths}")
+        print(f"  wavelength_patch_size: {cfg.model.model.wavelength_patch_size}")
+        print(f"  spatial_patch_size: {cfg.model.model.spatial_patch_size}")
+        
         # For spectral data: [B, H, W, Wavelengths]
         # Based on your model config, it expects wavelength_patch_size * num_wavelengths channels
         expected_channels = cfg.model.model.wavelength_patch_size * cfg.model.model.num_wavelengths
+        
+        print(f"  expected_channels: {expected_channels}")
+        print(f"  creating tensor shape: [{batch_size}, {img_size}, {img_size}, {expected_channels}]")
         
         x = torch.randn(batch_size, img_size, img_size, expected_channels, device=device)
         
@@ -324,14 +334,17 @@ class ComprehensiveBottleneckDiagnostic:
         forward_times = []
         with torch.no_grad():
             # Warmup
-            for _ in range(3):
+            for i in range(3):
                 try:
-                    _ = model(x)
-                except:
-                    # If forward fails, return error
-                    return {'error': 'Forward pass failed'}
+                    print(f"  Warmup {i+1}/3...")
+                    output = model(x)
+                    print(f"  Success! Output shape: {output.shape}")
+                except Exception as e:
+                    print(f"  Forward pass failed: {str(e)}")
+                    return {'error': f'Forward pass failed: {str(e)}'}
                     
             # Benchmark forward
+            print("  Running forward benchmark...")
             torch.cuda.synchronize()
             for _ in range(10):
                 start_time = time.perf_counter()

@@ -404,7 +404,7 @@ class ComprehensiveBottleneckDiagnostic:
             
             end_metrics = self.get_gpu_metrics(device.index if hasattr(device, 'index') else 1)
             avg_training_time = np.mean(training_times)
-        
+            
             return {
                 'forward_time_ms': avg_forward_time,
                 'training_step_time_ms': avg_training_time,

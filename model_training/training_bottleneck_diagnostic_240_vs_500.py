@@ -47,6 +47,14 @@ class ComprehensiveBottleneckDiagnostic:
         # Initialize GPU monitoring
         pynvml.nvmlInit()
         self.results = {}
+        self.text_file = None
+        
+    def log_both(self, message: str):
+        """Log message to both console and text file"""
+        print(message)
+        if self.text_file:
+            self.text_file.write(message + '\n')
+            self.text_file.flush()
         
     def get_gpu_metrics(self, device_id: int) -> Dict:
         """Get current GPU metrics"""
@@ -70,7 +78,7 @@ class ComprehensiveBottleneckDiagnostic:
             
     def test_configuration_matrix(self, spatial_size: int) -> Dict:
         """Test comprehensive matrix of configurations for given spatial size"""
-        print(f"\n=== TESTING {spatial_size}x{spatial_size} CONFIGURATION ===")
+        self.log_both(f"\n=== TESTING {spatial_size}x{spatial_size} CONFIGURATION ===")
         
         # Create configuration for this spatial size
         from copy import deepcopy
@@ -88,10 +96,10 @@ class ComprehensiveBottleneckDiagnostic:
         # Override model config
         cfg.model = model_config
         
-        print(f"Model config: {cfg.model.name}")
-        print(f"Image size: {cfg.model.model.img_size}")
-        print(f"Spatial patch size: {cfg.model.model.spatial_patch_size}")
-        print(f"Wavelength patches: {cfg.model.model.num_wavelengths}")
+        self.log_both(f"Model config: {cfg.model.name}")
+        self.log_both(f"Image size: {cfg.model.model.img_size}")
+        self.log_both(f"Spatial patch size: {cfg.model.model.spatial_patch_size}")
+        self.log_both(f"Wavelength patches: {cfg.model.model.num_wavelengths}")
         
         # Test different configurations
         worker_configs = [1, 2, 4, 8]
@@ -101,9 +109,9 @@ class ComprehensiveBottleneckDiagnostic:
         best_data_config = None
         best_data_throughput = 0
         
-        print(f"\n=== DATA LOADING PERFORMANCE ({spatial_size}x{spatial_size}) ===")
-        print(f"{'Workers':<8} {'Batch':<6} {'Samples/s':<12} {'Batch Time':<12} {'I/O %':<8} {'Status':<15}")
-        print("-" * 75)
+        self.log_both(f"\n=== DATA LOADING PERFORMANCE ({spatial_size}x{spatial_size}) ===")
+        self.log_both(f"{'Workers':<8} {'Batch':<6} {'Samples/s':<12} {'Batch Time':<12} {'I/O %':<8} {'Status':<15}")
+        self.log_both("-" * 75)
         
         # Create dataset once
         train_dataset, val_dataset = get_dataset(
@@ -134,7 +142,7 @@ class ComprehensiveBottleneckDiagnostic:
                             'samples_per_sec': 0,
                             'estimated_memory_gb': estimated_memory
                         }
-                        print(f"{num_workers:<8} {batch_size:<6} {'SKIPPED':<12} {'OOM Risk':<12} {'':<8} {'Memory > 10GB':<15}")
+                        self.log_both(f"{num_workers:<8} {batch_size:<6} {'SKIPPED':<12} {'OOM Risk':<12} {'':<8} {'Memory > 10GB':<15}")
                         continue
                     
                     dataloader = torch.utils.data.DataLoader(
@@ -386,6 +394,16 @@ class ComprehensiveBottleneckDiagnostic:
     def compare_configurations(self) -> Dict:
         """Compare 240x240 vs 500x500 configurations"""
         print("=== COMPREHENSIVE 240x240 vs 500x500 COMPARISON ===")
+        
+        # Open text file for logging
+        text_report_path = self.output_dir / f'diagnostic_report_{self.timestamp}.txt'
+        self.text_file = open(text_report_path, 'w')
+        
+        self.log_both("=== COMPREHENSIVE 240x240 vs 500x500 COMPARISON ===")
+        self.log_both(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self.log_both(f"Data path: {self.base_cfg.dataset.csv_path}")
+        self.log_both(f"Base configuration: {self.base_cfg.hparams.batch_size} batch, {self.base_cfg.dataloader.num_workers} workers")
+        self.log_both("")
         
         results_240 = self.test_configuration_matrix(240)
         results_500 = self.test_configuration_matrix(500)

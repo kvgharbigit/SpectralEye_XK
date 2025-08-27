@@ -39,6 +39,58 @@ import multiprocessing as mp
 from functools import partial
 
 
+class BenchmarkDataset(torch.utils.data.Dataset):
+    """Dataset for benchmarking data loading performance"""
+    def __init__(self, data_dir: str, size: int = 1000):
+        self.data_dir = Path(data_dir)
+        self.size = size
+        
+        # Find h5 files in the data directory
+        print(f"Looking for h5 files in: {self.data_dir}")
+        self.h5_files = list(self.data_dir.glob('**/*.h5'))
+        
+        if not self.h5_files:
+            # Check for hdf5 extension as well
+            self.h5_files = list(self.data_dir.glob('**/*.hdf5'))
+            
+        print(f"Found {len(self.h5_files)} h5/hdf5 files")
+        
+        if not self.h5_files:
+            print("No h5 files found, using dummy data for benchmarking")
+            self.use_dummy = True
+        else:
+            self.use_dummy = False
+            # Use only first 100 files for benchmarking
+            self.h5_files = self.h5_files[:100]
+            
+    def __len__(self):
+        return self.size
+        
+    def __getitem__(self, idx):
+        if self.use_dummy:
+            # Simulate data loading
+            time.sleep(0.001)  # Simulate I/O
+            spectral = np.random.randn(240, 240, 224).astype(np.float32)
+            rgb = np.random.randn(240, 240, 3).astype(np.float32)
+        else:
+            # Load from actual h5 file
+            file_idx = idx % len(self.h5_files)
+            with h5py.File(self.h5_files[file_idx], 'r') as f:
+                # Simulate loading a patch
+                if 'data' in f:
+                    data = f['data'][:]
+                    h, w = 240, 240
+                    if data.shape[0] >= h and data.shape[1] >= w:
+                        spectral = data[:h, :w, :224]
+                    else:
+                        spectral = np.random.randn(h, w, 224).astype(np.float32)
+                else:
+                    spectral = np.random.randn(240, 240, 224).astype(np.float32)
+            rgb = np.random.randn(240, 240, 3).astype(np.float32)
+            
+        return torch.from_numpy(spectral), torch.from_numpy(rgb)
+
+
 class GPUMonitor:
     """Monitor GPU metrics during operations"""
     
@@ -290,47 +342,7 @@ class BottleneckDiagnostic:
             
         loading_results = {}
         
-        # Create a simple dataset that mimics your hyperspectral data loading
-        class BenchmarkDataset(torch.utils.data.Dataset):
-            def __init__(self, data_dir: str, size: int = 1000):
-                self.data_dir = Path(data_dir)
-                self.size = size
-                
-                # Find some sample h5 files
-                self.h5_files = list(self.data_dir.glob('**/*.h5'))[:10]
-                if not self.h5_files:
-                    # Create dummy data if no h5 files found
-                    self.use_dummy = True
-                else:
-                    self.use_dummy = False
-                    
-            def __len__(self):
-                return self.size
-                
-            def __getitem__(self, idx):
-                if self.use_dummy:
-                    # Simulate data loading
-                    time.sleep(0.001)  # Simulate I/O
-                    spectral = np.random.randn(240, 240, 224).astype(np.float32)
-                    rgb = np.random.randn(240, 240, 3).astype(np.float32)
-                else:
-                    # Load from actual h5 file
-                    file_idx = idx % len(self.h5_files)
-                    with h5py.File(self.h5_files[file_idx], 'r') as f:
-                        # Simulate loading a patch
-                        if 'data' in f:
-                            data = f['data'][:]
-                            h, w = 240, 240
-                            if data.shape[0] >= h and data.shape[1] >= w:
-                                spectral = data[:h, :w, :224]
-                            else:
-                                spectral = np.random.randn(h, w, 224).astype(np.float32)
-                        else:
-                            spectral = np.random.randn(240, 240, 224).astype(np.float32)
-                    rgb = np.random.randn(240, 240, 3).astype(np.float32)
-                    
-                return torch.from_numpy(spectral), torch.from_numpy(rgb)
-                
+        # Use the global BenchmarkDataset class
         dataset = BenchmarkDataset(data_dir)
         
         for num_workers in num_workers_list:
@@ -655,7 +667,8 @@ def run_diagnostic(cfg: Optional[DictConfig] = None):
     # Use config if provided, otherwise use defaults
     device = cfg.get('device', 'cuda:0') if cfg else 'cuda:0'
     output_dir = cfg.get('output_dir', 'diagnostic_results') if cfg else 'diagnostic_results'
-    data_dir = cfg.get('data_dir', 'data') if cfg else 'data'
+    # Use the actual F drive path from your config
+    data_dir = cfg.get('data_dir', r'F:\Foundational_model\data_500') if cfg else r'F:\Foundational_model\data_500'
     
     if not torch.cuda.is_available():
         print("CUDA is not available. This diagnostic requires a GPU.")
@@ -688,6 +701,9 @@ def main(cfg: DictConfig):
 
 
 if __name__ == '__main__':
+    # Required for Windows multiprocessing
+    mp.freeze_support()
+    
     # Can run standalone without Hydra
     import sys
     if len(sys.argv) == 1:

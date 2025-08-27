@@ -342,68 +342,68 @@ class ComprehensiveBottleneckDiagnostic:
             # Test forward pass
             forward_times = []
             with torch.no_grad():
-            # Warmup
-            for i in range(3):
-                try:
-                    print(f"  Warmup {i+1}/3...")
-                    output = model(x)
-                    print(f"  Success! Output shape: {output.shape}")
-                except Exception as e:
-                    print(f"  Forward pass failed: {str(e)}")
-                    return {'error': f'Forward pass failed: {str(e)}'}
-                    
-            # Benchmark forward
-            print("  Running forward benchmark...")
-            torch.cuda.synchronize()
-            for _ in range(10):
-                start_time = time.perf_counter()
-                output = model(x)
+                # Warmup
+                for i in range(3):
+                    try:
+                        print(f"  Warmup {i+1}/3...")
+                        output = model(x)
+                        print(f"  Success! Output shape: {output.shape}")
+                    except Exception as e:
+                        print(f"  Forward pass failed: {str(e)}")
+                        return {'error': f'Forward pass failed: {str(e)}'}
+                        
+                # Benchmark forward
+                print("  Running forward benchmark...")
                 torch.cuda.synchronize()
-                forward_times.append((time.perf_counter() - start_time) * 1000)
-        
-        avg_forward_time = np.mean(forward_times)
-        
-        # Test training step
-        model.train()
-        optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.hparams.lr)
-        
-        # Create simplified loss (just MSE for testing)
-        loss_fn = nn.MSELoss()
-        
-        training_times = []
-        start_metrics = self.get_gpu_metrics(device.index if hasattr(device, 'index') else 1)
-        
-        if cfg.general.use_amp:
-            scaler = torch.cuda.amp.GradScaler()
+                for _ in range(10):
+                    start_time = time.perf_counter()
+                    output = model(x)
+                    torch.cuda.synchronize()
+                    forward_times.append((time.perf_counter() - start_time) * 1000)
             
-        for _ in range(5):
-            torch.cuda.synchronize()
-            start_time = time.perf_counter()
+            avg_forward_time = np.mean(forward_times)
             
-            try:
-                if cfg.general.use_amp:
-                    with torch.cuda.amp.autocast():
+            # Test training step
+            model.train()
+            optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.hparams.lr)
+            
+            # Create simplified loss (just MSE for testing)
+            loss_fn = nn.MSELoss()
+            
+            training_times = []
+            start_metrics = self.get_gpu_metrics(device.index if hasattr(device, 'index') else 1)
+            
+            if cfg.general.use_amp:
+                scaler = torch.cuda.amp.GradScaler()
+                
+            for _ in range(5):
+                torch.cuda.synchronize()
+                start_time = time.perf_counter()
+                
+                try:
+                    if cfg.general.use_amp:
+                        with torch.cuda.amp.autocast():
+                            output = model(x)
+                            loss = loss_fn(output, x)
+                        
+                        scaler.scale(loss).backward()
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
                         output = model(x)
                         loss = loss_fn(output, x)
+                        loss.backward()
+                        optimizer.step()
                     
-                    scaler.scale(loss).backward()
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    output = model(x)
-                    loss = loss_fn(output, x)
-                    loss.backward()
-                    optimizer.step()
-                
-                optimizer.zero_grad()
-                torch.cuda.synchronize()
-                training_times.append((time.perf_counter() - start_time) * 1000)
-                
-            except Exception as e:
-                return {'error': f'Training step failed: {str(e)}'}
-        
-        end_metrics = self.get_gpu_metrics(device.index if hasattr(device, 'index') else 1)
-        avg_training_time = np.mean(training_times)
+                    optimizer.zero_grad()
+                    torch.cuda.synchronize()
+                    training_times.append((time.perf_counter() - start_time) * 1000)
+                    
+                except Exception as e:
+                    return {'error': f'Training step failed: {str(e)}'}
+            
+            end_metrics = self.get_gpu_metrics(device.index if hasattr(device, 'index') else 1)
+            avg_training_time = np.mean(training_times)
         
             return {
                 'forward_time_ms': avg_forward_time,

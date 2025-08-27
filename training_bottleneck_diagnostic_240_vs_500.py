@@ -314,34 +314,34 @@ class ComprehensiveBottleneckDiagnostic:
             
             # Use DataParallel if configured
             if cfg.general.parallel.use_parallel:
-            model = model.to('cuda:0')
-            model = nn.DataParallel(model, device_ids=cfg.general.parallel.device_ids)
-            device = torch.device('cuda:0')
-        
-        # Create input tensor with correct dimensions
-        img_size = cfg.model.model.img_size
-        
-        # Debug: print model expectations
-        print(f"DEBUG - Model expects:")
-        print(f"  img_size: {img_size}")
-        print(f"  num_wavelengths: {cfg.model.model.num_wavelengths}")
-        print(f"  wavelength_patch_size: {cfg.model.model.wavelength_patch_size}")
-        print(f"  spatial_patch_size: {cfg.model.model.spatial_patch_size}")
-        
-        # For spectral data: [B, H, W, Wavelengths]
-        # Based on your model config, it expects wavelength_patch_size * num_wavelengths channels
-        expected_channels = cfg.model.model.wavelength_patch_size * cfg.model.model.num_wavelengths
-        
-        print(f"  expected_channels: {expected_channels}")
-        print(f"  creating tensor shape: [{batch_size}, {img_size}, {img_size}, {expected_channels}]")
-        
-        x = torch.randn(batch_size, img_size, img_size, expected_channels, device=device)
-        
-        model.eval()
-        
-        # Test forward pass
-        forward_times = []
-        with torch.no_grad():
+                model = model.to('cuda:0')
+                model = nn.DataParallel(model, device_ids=cfg.general.parallel.device_ids)
+                device = torch.device('cuda:0')
+            
+            # Create input tensor with correct dimensions
+            img_size = cfg.model.model.img_size
+            
+            # Debug: print model expectations
+            print(f"DEBUG - Model expects:")
+            print(f"  img_size: {img_size}")
+            print(f"  num_wavelengths: {cfg.model.model.num_wavelengths}")
+            print(f"  wavelength_patch_size: {cfg.model.model.wavelength_patch_size}")
+            print(f"  spatial_patch_size: {cfg.model.model.spatial_patch_size}")
+            
+            # For spectral data: [B, H, W, Wavelengths]
+            # Based on your model config, it expects wavelength_patch_size * num_wavelengths channels
+            expected_channels = cfg.model.model.wavelength_patch_size * cfg.model.model.num_wavelengths
+            
+            print(f"  expected_channels: {expected_channels}")
+            print(f"  creating tensor shape: [{batch_size}, {img_size}, {img_size}, {expected_channels}]")
+            
+            x = torch.randn(batch_size, img_size, img_size, expected_channels, device=device)
+            
+            model.eval()
+            
+            # Test forward pass
+            forward_times = []
+            with torch.no_grad():
             # Warmup
             for i in range(3):
                 try:

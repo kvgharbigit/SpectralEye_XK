@@ -37,7 +37,6 @@ from contextlib import contextmanager
 from model_training.models.spectral_gpt.spectral_gpt import MaskedAutoencoderViT
 from model_training.dataset.combined_dataset import SegmentationDataset, get_dataset
 from model_training.losses.custom_loss import CustomLoss
-from model_training.metrics.reconstruction_mse import reconstruction_mse
 
 
 class SpecificBottleneckDiagnostic:

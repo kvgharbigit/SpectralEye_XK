@@ -282,7 +282,11 @@ class BottleneckDiagnostic:
         print("\n=== Testing Data Loading Performance ===")
         
         if num_workers_list is None:
-            num_workers_list = [0, 1, 2, 4, 8, 16]
+            # Skip 0 workers on Windows to avoid hanging
+            if os.name == 'nt':  # Windows
+                num_workers_list = [1, 2, 4, 8]
+            else:
+                num_workers_list = [0, 1, 2, 4, 8, 16]
             
         loading_results = {}
         

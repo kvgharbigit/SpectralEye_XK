@@ -36,9 +36,8 @@ from contextlib import contextmanager
 # Import your actual model and dataset
 from model_training.models.spectral_gpt.spectral_gpt import MaskedAutoencoderViT
 from model_training.dataset.combined_dataset import SegmentationDataset, get_dataset
-from model_training.losses.custom_loss import custom_loss
+from model_training.losses.custom_loss import CustomLoss
 from model_training.metrics.reconstruction_mse import reconstruction_mse
-from model_training.train_val.run_epoch import run_epoch
 
 
 class SpecificBottleneckDiagnostic:
@@ -274,7 +273,12 @@ class SpecificBottleneckDiagnostic:
         print("\nTesting full training step...")
         model.train()
         optimizer = torch.optim.AdamW(model.parameters(), lr=self.cfg.hparams.lr)
-        loss_fn = custom_loss(delta=self.cfg.loss.delta)
+        loss_fn = CustomLoss(
+            reconstruction_weight=self.cfg.loss.reconstruction_weight,
+            angle_weight=self.cfg.loss.angle_weight,
+            variance_weight=self.cfg.loss.variance_weight,
+            range_weight=self.cfg.loss.range_weight
+        ).to(self.device)
         
         with self.profile_section('training_step'):
             train_times = []
@@ -285,14 +289,20 @@ class SpecificBottleneckDiagnostic:
                 if self.cfg.general.use_amp:
                     with torch.cuda.amp.autocast():
                         output = model(x)
-                        loss = loss_fn(output, x)
+                        # CustomLoss expects (reconstructed, original, latent, rgb)
+                        # For MAE, output is the reconstructed image
+                        dummy_latent = torch.randn_like(x[:, :, :, :3]).to(self.device)  # Dummy latent
+                        dummy_rgb = torch.randn(x.shape[0], x.shape[1], x.shape[2], 3).to(self.device)  # Dummy RGB
+                        loss = loss_fn(output, x, dummy_latent, dummy_rgb)
                     
                     scaler.scale(loss).backward()
                     scaler.step(optimizer)
                     scaler.update()
                 else:
                     output = model(x)
-                    loss = loss_fn(output, x)
+                    dummy_latent = torch.randn_like(x[:, :, :, :3]).to(self.device)
+                    dummy_rgb = torch.randn(x.shape[0], x.shape[1], x.shape[2], 3).to(self.device)
+                    loss = loss_fn(output, x, dummy_latent, dummy_rgb)
                     loss.backward()
                     optimizer.step()
                     
@@ -367,7 +377,12 @@ class SpecificBottleneckDiagnostic:
             model = nn.DataParallel(model, device_ids=self.cfg.general.parallel.device_ids)
             
         optimizer = torch.optim.AdamW(model.parameters(), lr=self.cfg.hparams.lr)
-        loss_fn = custom_loss(delta=self.cfg.loss.delta)
+        loss_fn = CustomLoss(
+            reconstruction_weight=self.cfg.loss.reconstruction_weight,
+            angle_weight=self.cfg.loss.angle_weight,
+            variance_weight=self.cfg.loss.variance_weight,
+            range_weight=self.cfg.loss.range_weight
+        ).to(self.device)
         
         # Profile different parts of the epoch
         epoch_timings = {
@@ -415,9 +430,13 @@ class SpecificBottleneckDiagnostic:
             loss_start = time.perf_counter()
             if self.cfg.general.use_amp:
                 with torch.cuda.amp.autocast():
-                    loss = loss_fn(output, spectral)
+                    dummy_latent = torch.randn_like(spectral[:, :, :, :3]).to(self.device)
+                    dummy_rgb = torch.randn(spectral.shape[0], spectral.shape[1], spectral.shape[2], 3).to(self.device)
+                    loss = loss_fn(output, spectral, dummy_latent, dummy_rgb)
             else:
-                loss = loss_fn(output, spectral)
+                dummy_latent = torch.randn_like(spectral[:, :, :, :3]).to(self.device)
+                dummy_rgb = torch.randn(spectral.shape[0], spectral.shape[1], spectral.shape[2], 3).to(self.device)
+                loss = loss_fn(output, spectral, dummy_latent, dummy_rgb)
             torch.cuda.synchronize()
             loss_time = time.perf_counter() - loss_start
             epoch_timings['loss_computation'].append(loss_time)

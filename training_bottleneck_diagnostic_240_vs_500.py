@@ -393,7 +393,8 @@ class ComprehensiveBottleneckDiagnostic:
                             # Model returns (loss, pred, mask) tuple
                             loss_val, pred, mask = output
                             # Use model's internal loss instead of external loss function
-                            loss = loss_val
+                            # Ensure loss is scalar for backprop
+                            loss = torch.mean(loss_val) if loss_val.dim() > 0 else loss_val
                         
                         scaler.scale(loss).backward()
                         scaler.step(optimizer)
@@ -403,7 +404,8 @@ class ComprehensiveBottleneckDiagnostic:
                         # Model returns (loss, pred, mask) tuple
                         loss_val, pred, mask = output
                         # Use model's internal loss instead of external loss function
-                        loss = loss_val
+                        # Ensure loss is scalar for backprop
+                        loss = torch.mean(loss_val) if loss_val.dim() > 0 else loss_val
                         loss.backward()
                         optimizer.step()
                     

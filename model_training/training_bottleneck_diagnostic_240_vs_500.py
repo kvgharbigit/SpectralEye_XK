@@ -103,7 +103,7 @@ class ComprehensiveBottleneckDiagnostic:
         
         # Test different configurations
         worker_configs = [1, 2, 4, 8]
-        batch_sizes = [1, 2, 4, 6, 8] if spatial_size == 500 else [1, 2, 4, 6, 8, 12, 16]  # 240 allows larger batches
+        batch_sizes = [1, 2, 4, 6, 8]  # Test batch sizes up to 8 for both spatial sizes
         
         results = {}
         best_data_config = None

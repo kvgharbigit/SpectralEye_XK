@@ -76,218 +76,146 @@ class ComprehensiveBottleneckDiagnostic:
         except:
             return {}
             
-    def test_configuration_matrix(self, spatial_size: int) -> Dict:
-        """Test comprehensive matrix of configurations for given spatial size"""
-        self.log_both(f"\n=== TESTING {spatial_size}x{spatial_size} CONFIGURATION ===")
+    def find_max_batch_size(self, cfg: DictConfig, spatial_size: int, model_name: str) -> int:
+        """Find maximum batch size that fits in GPU memory for given model/size"""
+        self.log_both(f"  Finding maximum batch size for {model_name} at {spatial_size}x{spatial_size}...")
         
-        # Create configuration for this spatial size
-        from copy import deepcopy
-        cfg = OmegaConf.create(OmegaConf.to_yaml(self.base_cfg))
-        cfg.spatial_size = spatial_size
+        max_batch = 1
+        test_batches = [1, 2, 4, 6, 8, 12, 16, 24, 32]  # Test up to batch 32
         
-        # Update model config based on spatial size
-        if spatial_size == 240:
-            # Load 240x240 model config
-            model_config = OmegaConf.load('model_training/conf/model/mae_medium_240.yaml')
-        else:
-            # Use default 500x500 config
-            model_config = OmegaConf.load('model_training/conf/model/mae_medium.yaml')
-        
-        # Override model config
-        cfg.model = model_config
-        
-        self.log_both(f"Model config: {cfg.model.name}")
-        self.log_both(f"Image size: {cfg.model.model.img_size}")
-        self.log_both(f"Spatial patch size: {cfg.model.model.spatial_patch_size}")
-        self.log_both(f"Wavelength patches: {cfg.model.model.num_wavelengths}")
-        
-        # Test different configurations
-        worker_configs = [1, 2, 4]  # Remove 8 workers - diminishing returns
-        batch_sizes = [1, 2, 4, 6]  # Test batch sizes up to 6
-        
-        results = {}
-        best_data_config = None
-        best_data_throughput = 0
-        
-        self.log_both(f"\n=== DATA LOADING PERFORMANCE ({spatial_size}x{spatial_size}) ===")
-        self.log_both(f"{'Workers':<8} {'Batch':<6} {'Samples/s':<12} {'Batch Time':<12} {'I/O %':<8} {'Status':<15}")
-        self.log_both("-" * 75)
-        
-        # Create dataset once
-        train_dataset, val_dataset = get_dataset(
-            csv_path=cfg.dataset.csv_path,
-            train_ratio=cfg.dataset.train_ratio,
-            seed=cfg.dataset.seed,
-            trial_mode=True,
-            trial_size=200,
-            transform=None
-        )
-        
-        # Test data loading configurations
-        for batch_size in batch_sizes:
-            for num_workers in worker_configs:
-                config_key = f"{spatial_size}x{spatial_size}_w{num_workers}_b{batch_size}"
-                
-                try:
-                    # Memory estimation (rough)
-                    channels = 224  # Assuming 224 spectral channels
-                    estimated_memory = batch_size * spatial_size * spatial_size * channels * 4 / (1024**3)
-                    
-                    if estimated_memory > 10:  # Skip if likely to OOM
-                        results[config_key] = {
-                            'spatial_size': spatial_size,
-                            'batch_size': batch_size,
-                            'num_workers': num_workers,
-                            'status': 'SKIPPED_MEMORY',
-                            'samples_per_sec': 0,
-                            'estimated_memory_gb': estimated_memory
-                        }
-                        self.log_both(f"{num_workers:<8} {batch_size:<6} {'SKIPPED':<12} {'OOM Risk':<12} {'':<8} {'Memory > 10GB':<15}")
-                        continue
-                    
-                    dataloader = torch.utils.data.DataLoader(
-                        train_dataset,
-                        batch_size=batch_size,
-                        num_workers=num_workers,
-                        pin_memory=num_workers > 0,
-                        prefetch_factor=2 if num_workers > 0 else None,
-                        persistent_workers=num_workers > 1,
-                        shuffle=False,
-                        timeout=30 if num_workers > 0 else 0
-                    )
-                    
-                    # Quick warmup
-                    for i, batch in enumerate(dataloader):
-                        if i >= 2:
-                            break
-                    
-                    # Benchmark data loading
-                    # Use available GPU device
-                    if torch.cuda.device_count() > 1:
-                        device = torch.device('cuda:1')
-                    else:
-                        device = torch.device('cuda:0')
-                    num_batches = min(15, len(dataloader))
-                    batch_times = []
-                    io_times = []
-                    
-                    start_time = time.perf_counter()
-                    for i, batch in enumerate(dataloader):
-                        if i >= num_batches:
-                            break
-                            
-                        batch_start = time.perf_counter()
-                        
-                        # Get data
-                        if isinstance(batch, dict):
-                            spectral = batch['spectral']
-                        else:
-                            spectral = batch[0]
-                            
-                        io_end = time.perf_counter()
-                        io_time = io_end - batch_start
-                        
-                        # Transfer to GPU
-                        spectral_gpu = spectral.to(device, non_blocking=True)
-                        torch.cuda.synchronize()
-                        
-                        total_time = time.perf_counter() - batch_start
-                        
-                        batch_times.append(total_time)
-                        io_times.append(io_time)
-                    
-                    # Calculate metrics
-                    avg_batch_time = np.mean(batch_times)
-                    avg_io_time = np.mean(io_times)
-                    total_time = sum(batch_times)
-                    samples_per_sec = (num_batches * batch_size) / total_time if total_time > 0 else 0
-                    io_overhead_pct = (avg_io_time / avg_batch_time) * 100 if avg_batch_time > 0 else 0
-                    
-                    results[config_key] = {
-                        'spatial_size': spatial_size,
-                        'batch_size': batch_size,
-                        'num_workers': num_workers,
-                        'samples_per_sec': samples_per_sec,
-                        'avg_batch_time_ms': avg_batch_time * 1000,
-                        'io_overhead_pct': io_overhead_pct,
-                        'estimated_memory_gb': estimated_memory,
-                        'status': 'SUCCESS'
-                    }
-                    
-                    if samples_per_sec > best_data_throughput:
-                        best_data_throughput = samples_per_sec
-                        best_data_config = config_key
-                    
-                    # Status
-                    if io_overhead_pct > 80:
-                        status = "I/O BOUND"
-                    elif avg_batch_time > 0.01:  # > 10ms
-                        status = "SLOW"
-                    else:
-                        status = "GOOD"
-                    
-                    self.log_both(f"{num_workers:<8} {batch_size:<6} {samples_per_sec:<12.0f} {avg_batch_time*1000:<12.1f} {io_overhead_pct:<8.1f} {status:<15}")
-                    
-                except Exception as e:
-                    results[config_key] = {
-                        'spatial_size': spatial_size,
-                        'status': f'ERROR: {str(e)[:20]}',
-                        'samples_per_sec': 0
-                    }
-                    self.log_both(f"{num_workers:<8} {batch_size:<6} {'ERROR':<12} {str(e)[:30]:<30}")
-                    continue
-        
-        self.log_both(f"\nBest data loading config: {best_data_config} ({best_data_throughput:.0f} samples/sec)")
-        
-        # Now test model performance with optimal data loading configs
-        self.log_both(f"\n=== MODEL PERFORMANCE TESTING ({spatial_size}x{spatial_size}) ===")
-        
-        # Test ALL data loading configs with actual model (not just top 3)
-        sorted_configs = sorted([k for k, v in results.items() if v.get('samples_per_sec', 0) > 0], 
-                               key=lambda k: results[k]['samples_per_sec'], reverse=True)
-        
-        self.log_both(f"{'Config':<20} {'Data Rate':<12} {'Model FWD':<12} {'Model BWD':<12} {'GPU Util':<10} {'Memory':<10} {'Overall':<12}")
-        self.log_both("-" * 100)
-        
-        for config_key in sorted_configs:
-            config_result = results[config_key]
-            batch_size = config_result['batch_size']
-            num_workers = config_result['num_workers']
-            
+        for batch_size in test_batches:
             try:
-                # Test model performance with memory error handling
-                self.log_both(f"  Testing model performance for {config_key}...")
-                model_results = self.test_model_performance(cfg, batch_size, num_workers)
+                # Quick memory test with minimal overhead
+                torch.cuda.empty_cache()
+                model_results = self.test_model_performance(cfg, batch_size, num_workers=1, quick_test=True)
                 
-                # Update results
-                results[config_key].update(model_results)
-                
-                config_display = f"w{num_workers}_b{batch_size}"
-                data_rate = config_result['samples_per_sec']
-                
-                if 'forward_time_ms' in model_results:
-                    fwd_time = model_results['forward_time_ms']
-                    bwd_time = model_results.get('training_step_time_ms', 0) - fwd_time
-                    gpu_util = model_results.get('gpu_util', 0)
-                    memory_gb = model_results.get('memory_gb', 0)
-                    
-                    # Calculate overall training throughput (samples per second in training)
-                    if model_results.get('training_step_time_ms', 0) > 0:
-                        training_samples_per_sec = (batch_size * 1000) / model_results['training_step_time_ms']
-                    else:
-                        training_samples_per_sec = 0
-                    
-                    self.log_both(f"{config_display:<20} {data_rate:<12.0f} {fwd_time:<12.1f} {bwd_time:<12.1f} {gpu_util:<10.1f} {memory_gb:<10.1f} {training_samples_per_sec:<12.1f}")
+                if 'error' not in model_results:
+                    max_batch = batch_size
+                    memory_used = model_results.get('memory_gb', 0)
+                    self.log_both(f"    Batch {batch_size}: OK ({memory_used:.1f}GB)")
                 else:
-                    self.log_both(f"{config_display:<20} {data_rate:<12.0f} {'ERROR':<12} {'ERROR':<12} {'ERROR':<10} {'ERROR':<10} {'ERROR':<12}")
+                    # Stop at first OOM
+                    self.log_both(f"    Batch {batch_size}: OOM - Max batch size is {max_batch}")
+                    break
                     
             except Exception as e:
-                self.log_both(f"{config_key:<20} {'ERROR':<50} {str(e)[:30]}")
-                results[config_key]['model_error'] = str(e)
+                if "out of memory" in str(e).lower():
+                    self.log_both(f"    Batch {batch_size}: OOM - Max batch size is {max_batch}")
+                    break
+                else:
+                    # Other error, continue testing
+                    continue
         
-        return results
+        self.log_both(f"  Maximum batch size for {model_name} at {spatial_size}x{spatial_size}: {max_batch}")
+        return max_batch
+    
+    def test_configuration_matrix(self, spatial_size: int) -> Dict:
+        """Test comprehensive matrix of configurations for given spatial size"""
+        all_results = {}
         
-    def test_model_performance(self, cfg: DictConfig, batch_size: int, num_workers: int) -> Dict:
+        # Test both mae_small and mae_medium
+        model_configs = [
+            ('mae_small_240' if spatial_size == 240 else 'mae_small', 'mae_small'),
+            ('mae_medium_240' if spatial_size == 240 else 'mae_medium', 'mae_medium')
+        ]
+        
+        for config_file, model_name in model_configs:
+            self.log_both(f"\n=== TESTING {spatial_size}x{spatial_size} - {model_name.upper()} ===")
+            
+            # Create configuration for this spatial size and model
+            from copy import deepcopy
+            cfg = OmegaConf.create(OmegaConf.to_yaml(self.base_cfg))
+            cfg.spatial_size = spatial_size
+            
+            # Load appropriate model config
+            config_path = f'model_training/conf/model/{config_file}.yaml'
+            model_config = OmegaConf.load(config_path)
+            cfg.model = model_config
+            
+            self.log_both(f"Model config: {cfg.model.name}")
+            self.log_both(f"Image size: {cfg.model.model.img_size}")
+            self.log_both(f"Spatial patch size: {cfg.model.model.spatial_patch_size}")
+            self.log_both(f"Wavelength patches: {cfg.model.model.num_wavelengths}")
+            
+            # Find maximum batch size for this configuration
+            max_batch = self.find_max_batch_size(cfg, spatial_size, model_name)
+            
+            # Test different configurations up to max batch
+            worker_configs = [1, 2, 4]
+            # Generate batch sizes up to maximum found
+            batch_sizes = [b for b in [1, 2, 4, 6, 8, 12, 16, 24, 32] if b <= max_batch]
+        
+            results = {}
+            
+            # Test all permutations for this model
+            self.log_both(f"\n=== MODEL PERFORMANCE TESTING ({spatial_size}x{spatial_size}) - {model_name.upper()} - ALL CONFIGURATIONS ===")
+            self.log_both(f"Testing batch sizes: {batch_sizes}")
+            self.log_both(f"{'Config':<20} {'Model FWD':<12} {'Model BWD':<12} {'GPU Util':<10} {'Memory':<10} {'Training/s':<12} {'Epoch(34k)':<12}")
+            self.log_both("-" * 100)
+        
+            # Test model performance for all configurations directly
+            for batch_size in batch_sizes:
+                for num_workers in worker_configs:
+                    config_key = f"{spatial_size}x{spatial_size}_{model_name}_w{num_workers}_b{batch_size}"
+                
+                    try:
+                        # Test model performance directly (skip if batch > max_batch)
+                        if batch_size > max_batch:
+                            continue
+                            
+                        self.log_both(f"  Testing w{num_workers}_b{batch_size}...")
+                        model_results = self.test_model_performance(cfg, batch_size, num_workers)
+                        
+                        results[config_key] = {
+                            'spatial_size': spatial_size,
+                            'model_name': model_name,
+                            'batch_size': batch_size,
+                            'num_workers': num_workers
+                        }
+                        results[config_key].update(model_results)
+                        
+                        config_display = f"w{num_workers}_b{batch_size}"
+                        
+                        if 'forward_time_ms' in model_results:
+                            fwd_time = model_results['forward_time_ms']
+                            bwd_time = model_results.get('training_step_time_ms', 0) - fwd_time
+                            gpu_util = model_results.get('gpu_util', 0)
+                            memory_gb = model_results.get('memory_gb', 0)
+                            
+                            # Calculate overall training throughput (samples per second in training)
+                            if model_results.get('training_step_time_ms', 0) > 0:
+                                training_samples_per_sec = (batch_size * 1000) / model_results['training_step_time_ms']
+                                # Calculate epoch time for 34k dataset
+                                epoch_seconds = 34000 / training_samples_per_sec
+                                epoch_minutes = epoch_seconds / 60
+                                if epoch_minutes >= 60:
+                                    epoch_time = f"{epoch_minutes/60:.1f}h"
+                                else:
+                                    epoch_time = f"{epoch_minutes:.0f}min"
+                            else:
+                                training_samples_per_sec = 0
+                                epoch_time = "N/A"
+                            
+                            self.log_both(f"{config_display:<20} {fwd_time:<12.1f} {bwd_time:<12.1f} {gpu_util:<10.1f} {memory_gb:<10.1f} {training_samples_per_sec:<12.1f} {epoch_time:<12}")
+                        else:
+                            self.log_both(f"{config_display:<20} {'ERROR':<12} {'ERROR':<12} {'ERROR':<10} {'ERROR':<10} {'ERROR':<12} {'ERROR':<12}")
+                            
+                    except Exception as e:
+                        results[config_key] = {
+                            'spatial_size': spatial_size,
+                            'model_name': model_name,
+                            'batch_size': batch_size,
+                            'num_workers': num_workers,
+                            'status': f'ERROR: {str(e)[:30]}'
+                        }
+                        self.log_both(f"w{num_workers}_b{batch_size}        ERROR: {str(e)[:50]}")
+            
+            # Add this model's results to all_results
+            all_results[f"{spatial_size}_{model_name}"] = results
+        
+        return all_results
+        
+    def test_model_performance(self, cfg: DictConfig, batch_size: int, num_workers: int, quick_test: bool = False) -> Dict:
         """Test actual model performance with given configuration"""
         
         device = torch.device('cuda:1')  # Your configured device
@@ -349,24 +277,29 @@ class ComprehensiveBottleneckDiagnostic:
             # Test forward pass
             forward_times = []
             with torch.no_grad():
-                # Warmup
-                for i in range(3):
+                # Warmup (fewer iterations for quick test)
+                warmup_iterations = 1 if quick_test else 3
+                for i in range(warmup_iterations):
                     try:
-                        print(f"  Warmup {i+1}/3...")
+                        if not quick_test:
+                            print(f"  Warmup {i+1}/{warmup_iterations}...")
                         output = model(x)
                     # Model returns (loss, pred, mask) tuple
-                        if isinstance(output, tuple):
+                        if isinstance(output, tuple) and not quick_test:
                             print(f"  Success! Output tuple with {len(output)} elements")
-                        else:
+                        elif not quick_test:
                             print(f"  Success! Output shape: {output.shape}")
                     except Exception as e:
-                        print(f"  Forward pass failed: {str(e)}")
+                        if not quick_test:
+                            print(f"  Forward pass failed: {str(e)}")
                         return {'error': f'Forward pass failed: {str(e)}'}
                         
-                # Benchmark forward
-                print("  Running forward benchmark...")
+                # Benchmark forward (fewer iterations for quick test)
+                benchmark_iterations = 2 if quick_test else 10
+                if not quick_test:
+                    print("  Running forward benchmark...")
                 torch.cuda.synchronize()
-                for _ in range(10):
+                for _ in range(benchmark_iterations):
                     start_time = time.perf_counter()
                     output = model(x)
                     # Model returns (loss, pred, mask) tuple
@@ -374,7 +307,18 @@ class ComprehensiveBottleneckDiagnostic:
                     forward_times.append((time.perf_counter() - start_time) * 1000)
             
             avg_forward_time = np.mean(forward_times)
-            print(f"  Forward pass completed: {len(forward_times)} runs, avg time: {avg_forward_time:.1f}ms")
+            if not quick_test:
+                print(f"  Forward pass completed: {len(forward_times)} runs, avg time: {avg_forward_time:.1f}ms")
+            
+            # Skip training test for quick memory check
+            if quick_test:
+                # Get memory usage and return early
+                device_idx = getattr(device, 'index', 0) if hasattr(device, 'index') else 0
+                end_metrics = self.get_gpu_metrics(device_idx)
+                return {
+                    'forward_time_ms': avg_forward_time,
+                    'memory_gb': end_metrics.get('memory_used_gb', 0),
+                }
             
             # Test training step
             model.train()

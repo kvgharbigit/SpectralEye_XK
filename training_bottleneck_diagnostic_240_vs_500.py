@@ -103,7 +103,7 @@ class ComprehensiveBottleneckDiagnostic:
         
         # Test different configurations
         worker_configs = [1, 2, 4]  # Remove 8 workers - diminishing returns
-        batch_sizes = [1, 2, 4, 6, 8]  # Test batch sizes up to 8 for both spatial sizes
+        batch_sizes = [1, 2, 4, 6]  # Test batch sizes up to 6
         
         results = {}
         best_data_config = None

@@ -93,98 +93,191 @@ class SpecificBottleneckDiagnostic:
             'gpu_metrics_end': end_metrics
         }
         
-    def test_actual_data_loading(self) -> Dict:
-        """Test your actual data loading pipeline"""
-        print("\n=== Testing YOUR Actual Data Loading Pipeline ===")
+    def test_comprehensive_configurations(self) -> Dict:
+        """Test different combinations of workers and batch sizes"""
+        print("\n=== COMPREHENSIVE CONFIGURATION TESTING ===")
         print(f"Data path: {self.cfg.dataset.csv_path}")
-        print(f"Batch size: {self.cfg.hparams.batch_size}")
-        print(f"Workers: {self.cfg.dataloader.num_workers}")
         
         # Create your actual dataset
         train_dataset, val_dataset = get_dataset(
             csv_path=self.cfg.dataset.csv_path,
             train_ratio=self.cfg.dataset.train_ratio,
             seed=self.cfg.dataset.seed,
-            trial_mode=True,  # Use trial mode for faster testing
-            trial_size=100,
+            trial_mode=True,
+            trial_size=200,  # Larger for better testing
             transform=None
         )
         
         print(f"Dataset size (trial): {len(train_dataset)}")
         
-        # Test different number of workers
-        results = {}
-        worker_configs = [0, 1, 2, 4, 8] if os.name == 'nt' else [0, 1, 2, 4, 8, 16]
+        # Test configurations
+        worker_configs = [1, 2, 4, 8, 16] if os.name != 'nt' else [1, 2, 4, 8]
+        batch_sizes = [1, 2, 4, 8, 16, 32]  # Test range of batch sizes
         
-        for num_workers in worker_configs:
-            if num_workers == 0 and os.name == 'nt':
-                continue  # Skip 0 workers on Windows
+        results = {}
+        optimal_config = None
+        best_throughput = 0
+        
+        print(f"\n{'Workers':<8} {'Batch':<6} {'Samples/s':<12} {'GPU Util%':<10} {'Memory GB':<10} {'I/O Time%':<10} {'Status':<15}")
+        print("-" * 80)
+        
+        for batch_size in batch_sizes:
+            for num_workers in worker_configs:
+                config_key = f"w{num_workers}_b{batch_size}"
                 
-            print(f"\nTesting with {num_workers} workers")
-            
-            dataloader = torch.utils.data.DataLoader(
-                train_dataset,
-                batch_size=self.cfg.hparams.batch_size,
-                num_workers=num_workers,
-                pin_memory=self.cfg.dataloader.pin_memory and num_workers > 0,
-                prefetch_factor=self.cfg.dataloader.prefetch_factor if num_workers > 0 else None,
-                persistent_workers=self.cfg.dataloader.persistent_workers and num_workers > 0,
-                shuffle=self.cfg.dataloader.shuffle
-            )
-            
-            # Warmup
-            warmup_batches = 5
-            for i, batch in enumerate(dataloader):
-                if i >= warmup_batches:
-                    break
+                try:
+                    # Check if batch size fits in memory (rough estimate)
+                    estimated_memory = batch_size * 500 * 500 * 30 * 4 / (1024**3)  # GB
+                    if estimated_memory > 8:  # Skip if likely to OOM
+                        results[config_key] = {
+                            'status': 'SKIPPED_MEMORY',
+                            'samples_per_sec': 0,
+                            'gpu_util': 0,
+                            'memory_gb': 0,
+                            'io_overhead_pct': 0
+                        }
+                        print(f"{num_workers:<8} {batch_size:<6} {'SKIPPED':<12} {'OOM Risk':<25}")
+                        continue
                     
-            # Benchmark
-            with self.profile_section(f'dataload_{num_workers}_workers'):
-                num_batches = 20
-                batch_times = []
-                transfer_times = []
-                
-                for i, batch in enumerate(dataloader):
-                    if i >= num_batches:
-                        break
+                    dataloader = torch.utils.data.DataLoader(
+                        train_dataset,
+                        batch_size=batch_size,
+                        num_workers=num_workers,
+                        pin_memory=num_workers > 0,
+                        prefetch_factor=2 if num_workers > 0 else None,
+                        persistent_workers=num_workers > 1,
+                        shuffle=False,  # Faster for testing
+                        timeout=30 if num_workers > 0 else 0
+                    )
+                    
+                    # Quick warmup
+                    for i, batch in enumerate(dataloader):
+                        if i >= 2:
+                            break
+                    
+                    # Benchmark
+                    start_metrics = self.get_gpu_metrics()
+                    with self.profile_section(config_key):
+                        num_batches = min(20, len(dataloader))
+                        batch_times = []
+                        io_times = []
+                        gpu_times = []
                         
-                    batch_start = time.perf_counter()
+                        for i, batch in enumerate(dataloader):
+                            if i >= num_batches:
+                                break
+                                
+                            batch_start = time.perf_counter()
+                            
+                            # Get data
+                            if isinstance(batch, dict):
+                                spectral = batch['spectral']
+                            else:
+                                spectral = batch[0]
+                                
+                            io_end = time.perf_counter()
+                            io_time = io_end - batch_start
+                            
+                            # Transfer to GPU
+                            gpu_start = time.perf_counter()
+                            spectral_gpu = spectral.to(self.device, non_blocking=True)
+                            torch.cuda.synchronize()
+                            gpu_time = time.perf_counter() - gpu_start
+                            
+                            total_time = time.perf_counter() - batch_start
+                            
+                            batch_times.append(total_time)
+                            io_times.append(io_time)
+                            gpu_times.append(gpu_time)
                     
-                    # Get data
-                    if isinstance(batch, dict):
-                        spectral = batch['spectral']
-                        label = batch.get('label', None)
+                    end_metrics = self.get_gpu_metrics()
+                    
+                    # Calculate metrics
+                    avg_batch_time = np.mean(batch_times)
+                    avg_io_time = np.mean(io_times)
+                    samples_per_sec = (num_batches * batch_size) / sum(batch_times)
+                    io_overhead_pct = (avg_io_time / avg_batch_time) * 100
+                    
+                    gpu_util = end_metrics.get('gpu_util', 0)
+                    memory_gb = end_metrics.get('memory_used_gb', 0)
+                    
+                    results[config_key] = {
+                        'batch_size': batch_size,
+                        'num_workers': num_workers,
+                        'samples_per_sec': samples_per_sec,
+                        'avg_batch_time_ms': avg_batch_time * 1000,
+                        'io_overhead_pct': io_overhead_pct,
+                        'gpu_util': gpu_util,
+                        'memory_gb': memory_gb,
+                        'status': 'SUCCESS'
+                    }
+                    
+                    # Track best configuration
+                    if samples_per_sec > best_throughput:
+                        best_throughput = samples_per_sec
+                        optimal_config = config_key
+                    
+                    # Determine status
+                    if io_overhead_pct > 80:
+                        status = "I/O BOUND"
+                    elif gpu_util < 50:
+                        status = "GPU UNDERUSED"
+                    elif memory_gb > 8:
+                        status = "MEMORY HIGH"
                     else:
-                        spectral = batch[0]
-                        label = batch[1] if len(batch) > 1 else None
-                        
-                    # Transfer to GPU (this is what happens in training)
-                    transfer_start = time.perf_counter()
-                    spectral_gpu = spectral.to(self.device, non_blocking=True)
-                    if label is not None and hasattr(label, 'to'):
-                        label_gpu = label.to(self.device, non_blocking=True)
-                    torch.cuda.synchronize()
-                    transfer_time = time.perf_counter() - transfer_start
+                        status = "BALANCED"
                     
-                    batch_time = time.perf_counter() - batch_start
-                    batch_times.append(batch_time)
-                    transfer_times.append(transfer_time)
+                    print(f"{num_workers:<8} {batch_size:<6} {samples_per_sec:<12.0f} {gpu_util:<10.1f} {memory_gb:<10.1f} {io_overhead_pct:<10.1f} {status:<15}")
                     
-            avg_batch_time = np.mean(batch_times)
-            avg_transfer_time = np.mean(transfer_times)
-            samples_per_sec = (num_batches * self.cfg.hparams.batch_size) / sum(batch_times)
+                except Exception as e:
+                    results[config_key] = {
+                        'status': f'ERROR: {str(e)[:20]}',
+                        'samples_per_sec': 0,
+                        'gpu_util': 0,
+                        'memory_gb': 0,
+                        'io_overhead_pct': 0
+                    }
+                    print(f"{num_workers:<8} {batch_size:<6} {'ERROR':<12} {str(e)[:25]:<25}")
+                    continue
+        
+        # Summary
+        print(f"\n=== CONFIGURATION ANALYSIS ===")
+        if optimal_config:
+            opt_result = results[optimal_config]
+            print(f"OPTIMAL CONFIG: {opt_result['num_workers']} workers, batch size {opt_result['batch_size']}")
+            print(f"  Throughput: {opt_result['samples_per_sec']:.0f} samples/sec")
+            print(f"  Current config: 2 workers, batch size {self.cfg.hparams.batch_size}")
             
-            results[num_workers] = {
-                'avg_batch_time_ms': avg_batch_time * 1000,
-                'avg_transfer_time_ms': avg_transfer_time * 1000,
-                'samples_per_sec': samples_per_sec,
-                'transfer_overhead_pct': (avg_transfer_time / avg_batch_time) * 100
-            }
-            
-            print(f"  Avg batch time: {avg_batch_time*1000:.1f}ms")
-            print(f"  Avg transfer time: {avg_transfer_time*1000:.1f}ms ({results[num_workers]['transfer_overhead_pct']:.1f}%)")
-            print(f"  Samples/sec: {samples_per_sec:.1f}")
-            
+            current_key = f"w2_b{self.cfg.hparams.batch_size}"
+            if current_key in results:
+                current_throughput = results[current_key]['samples_per_sec']
+                improvement = (best_throughput / current_throughput - 1) * 100 if current_throughput > 0 else 0
+                print(f"  Potential speedup: {improvement:.1f}%")
+        
+        # Identify limiting factors
+        print(f"\n=== LIMITING FACTORS ===")
+        
+        # Analyze I/O bound scenarios
+        io_bound_configs = [k for k, v in results.items() if v.get('io_overhead_pct', 0) > 70]
+        if io_bound_configs:
+            print("I/O BOUND: High data loading overhead detected")
+            print("  - F: drive may be bottleneck (network drive?)")
+            print("  - Consider data caching or faster storage")
+        
+        # Analyze GPU utilization
+        low_gpu_configs = [k for k, v in results.items() if v.get('gpu_util', 100) < 60 and v.get('samples_per_sec', 0) > 0]
+        if low_gpu_configs:
+            print("GPU UNDERUTILIZED: Low GPU usage detected")
+            print("  - Increase batch size if memory allows")
+            print("  - Check if data loading is keeping up")
+        
+        # Analyze memory usage
+        high_mem_configs = [k for k, v in results.items() if v.get('memory_gb', 0) > 8]
+        if high_mem_configs:
+            print("MEMORY CONSTRAINED: High memory usage detected")
+            print("  - Consider gradient checkpointing")
+            print("  - Reduce batch size if needed")
+        
         return results
         
     def test_actual_model_forward(self) -> Dict:
@@ -607,7 +700,7 @@ def main(cfg: DictConfig):
     diag = SpecificBottleneckDiagnostic(cfg)
     
     # Run tests
-    diag.test_actual_data_loading()
+    diag.test_comprehensive_configurations()
     diag.test_actual_model_forward()
     diag.test_full_epoch()
     

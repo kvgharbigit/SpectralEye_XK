@@ -150,8 +150,8 @@ class ComprehensiveBottleneckDiagnostic:
             # Test all permutations for this model
             self.log_both(f"\n=== MODEL PERFORMANCE TESTING ({spatial_size}x{spatial_size}) - {model_name.upper()} - ALL CONFIGURATIONS ===")
             self.log_both(f"Testing batch sizes: {batch_sizes}")
-            self.log_both(f"{'Config':<20} {'Model FWD':<12} {'Model BWD':<12} {'GPU Util':<10} {'Memory':<10} {'Training/s':<12} {'Epoch(34k)':<12}")
-            self.log_both("-" * 100)
+            self.log_both(f"{'Config':<20} {'Data Load':<12} {'Model FWD':<12} {'Model BWD':<12} {'GPU Util':<10} {'Memory':<10} {'Training/s':<12} {'Epoch(34k)':<12}")
+            self.log_both("-" * 112)
         
             # Test model performance for all configurations directly
             for batch_size in batch_sizes:
@@ -177,6 +177,7 @@ class ComprehensiveBottleneckDiagnostic:
                         config_display = f"w{num_workers}_b{batch_size}"
                         
                         if 'forward_time_ms' in model_results:
+                            data_load_time = model_results.get('data_loading_time_ms', 0)
                             fwd_time = model_results['forward_time_ms']
                             bwd_time = model_results.get('training_step_time_ms', 0) - fwd_time
                             gpu_util = model_results.get('gpu_util', 0)
@@ -196,9 +197,9 @@ class ComprehensiveBottleneckDiagnostic:
                                 training_samples_per_sec = 0
                                 epoch_time = "N/A"
                             
-                            self.log_both(f"{config_display:<20} {fwd_time:<12.1f} {bwd_time:<12.1f} {gpu_util:<10.1f} {memory_gb:<10.1f} {training_samples_per_sec:<12.1f} {epoch_time:<12}")
+                            self.log_both(f"{config_display:<20} {data_load_time:<12.1f} {fwd_time:<12.1f} {bwd_time:<12.1f} {gpu_util:<10.1f} {memory_gb:<10.1f} {training_samples_per_sec:<12.1f} {epoch_time:<12}")
                         else:
-                            self.log_both(f"{config_display:<20} {'ERROR':<12} {'ERROR':<12} {'ERROR':<10} {'ERROR':<10} {'ERROR':<12} {'ERROR':<12}")
+                            self.log_both(f"{config_display:<20} {'ERROR':<12} {'ERROR':<12} {'ERROR':<12} {'ERROR':<10} {'ERROR':<10} {'ERROR':<12} {'ERROR':<12}")
                             
                     except Exception as e:
                         results[config_key] = {
@@ -251,26 +252,76 @@ class ComprehensiveBottleneckDiagnostic:
                 model = nn.DataParallel(model, device_ids=cfg.general.parallel.device_ids)
                 device = torch.device('cuda:0')
             
-            # Create input tensor with correct dimensions
+            # Create REAL DataLoader with actual SpectralEye data pipeline
             img_size = cfg.model.model.img_size
             
-            # Debug: print model expectations
-            print(f"DEBUG - Model expects:")
-            print(f"  img_size: {img_size}")
-            print(f"  num_wavelengths: {cfg.model.model.num_wavelengths}")
-            print(f"  wavelength_patch_size: {cfg.model.model.wavelength_patch_size}")
-            print(f"  spatial_patch_size: {cfg.model.model.spatial_patch_size}")
+            if not quick_test:
+                print(f"DEBUG - Setting up real data pipeline:")
+                print(f"  Loading from: {cfg.dataset.csv_path}")
+                print(f"  Image size: {img_size}")
+                print(f"  Batch size: {batch_size}")
+                print(f"  Workers: {num_workers}")
             
-            # For spectral data: [B, H, W, Wavelengths]
-            # The model expects num_wavelengths channels (patching happens inside the model)
-            expected_channels = cfg.model.model.num_wavelengths
+            # Import actual dataset and preprocessing
+            from model_training.dataset.combined_dataset import get_dataset
+            from model_training.utils.preprocess_hsi import preprocess_hsi
             
-            print(f"  expected_channels: {expected_channels}")
-            print(f"  creating tensor shape: [{batch_size}, {expected_channels}, {img_size}, {img_size}]")
+            # Create real dataset (small subset for testing)
+            train_dataset, val_dataset = get_dataset(
+                csv_path=cfg.dataset.csv_path,
+                train_ratio=cfg.dataset.train_ratio,
+                seed=cfg.dataset.seed,
+                trial_mode=True,  # Use small subset for testing
+                trial_size=50,    # Very small for performance testing
+                transform=None    # Skip augmentations for cleaner benchmarking
+            )
             
-            # Model expects: [batch_size, wavelengths, height, width] 
-            # (unsqueeze(dim=1) is called inside the encoder)
-            x = torch.randn(batch_size, expected_channels, img_size, img_size, device=device)
+            # Create real DataLoader with actual configuration
+            dataloader = torch.utils.data.DataLoader(
+                train_dataset,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                pin_memory=True,
+                prefetch_factor=2 if num_workers > 0 else None,
+                persistent_workers=num_workers > 1,
+                shuffle=False,    # Disable shuffle for consistent timing
+                timeout=60 if num_workers > 0 else 0
+            )
+            
+            # Get a real batch from F: drive with timing
+            if not quick_test:
+                print(f"  Loading real batch from F: drive...")
+            
+            batch_load_start = time.perf_counter()
+            real_batch = None
+            
+            for i, batch in enumerate(dataloader):
+                if i >= 1:  # Just need one batch for model testing
+                    break
+                    
+                # Unpack SpectralEye batch format: hs_cube, label, rgb
+                hs_cube, label, rgb = batch
+                
+                # Apply real preprocessing pipeline (log transform + normalization)
+                hs_cube = preprocess_hsi(hs_cube)
+                
+                # Transfer to GPU (as done in actual training)
+                hs_cube = hs_cube.to(device, non_blocking=True)
+                
+                real_batch = hs_cube
+                torch.cuda.synchronize()
+                break
+            
+            data_load_time = (time.perf_counter() - batch_load_start) * 1000
+            
+            if real_batch is None:
+                return {'error': 'No data batches loaded from F: drive'}
+                
+            # Use real data instead of synthetic
+            x = real_batch
+            
+            if not quick_test:
+                print(f"  Real data loaded: {x.shape}, F: drive + preprocessing time: {data_load_time:.1f}ms")
             
             model.eval()
             
@@ -317,6 +368,7 @@ class ComprehensiveBottleneckDiagnostic:
                 end_metrics = self.get_gpu_metrics(device_idx)
                 return {
                     'forward_time_ms': avg_forward_time,
+                    'data_loading_time_ms': data_load_time,
                     'memory_gb': end_metrics.get('memory_used_gb', 0),
                 }
             
@@ -380,6 +432,7 @@ class ComprehensiveBottleneckDiagnostic:
             return {
                 'forward_time_ms': avg_forward_time,
                 'training_step_time_ms': avg_training_time,
+                'data_loading_time_ms': data_load_time,
                 'gpu_util': end_metrics.get('gpu_util', 0),
                 'memory_gb': end_metrics.get('memory_used_gb', 0),
                 'power_w': end_metrics.get('power_w', 0)

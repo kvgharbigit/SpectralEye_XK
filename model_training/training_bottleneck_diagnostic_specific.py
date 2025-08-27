@@ -101,16 +101,14 @@ class SpecificBottleneckDiagnostic:
         print(f"Workers: {self.cfg.dataloader.num_workers}")
         
         # Create your actual dataset
-        dataset_fn = get_dataset(
+        train_dataset, val_dataset = get_dataset(
             csv_path=self.cfg.dataset.csv_path,
             train_ratio=self.cfg.dataset.train_ratio,
             seed=self.cfg.dataset.seed,
             trial_mode=True,  # Use trial mode for faster testing
-            trial_size=100
+            trial_size=100,
+            transform=None
         )
-        
-        # Test with your configuration
-        train_dataset = dataset_fn(phase='train', transform=None)
         
         print(f"Dataset size (trial): {len(train_dataset)}")
         
@@ -336,15 +334,14 @@ class SpecificBottleneckDiagnostic:
         print("\n=== Testing Full Training Epoch ===")
         
         # Create dataset and dataloader
-        dataset_fn = get_dataset(
+        train_dataset, val_dataset = get_dataset(
             csv_path=self.cfg.dataset.csv_path,
             train_ratio=self.cfg.dataset.train_ratio,
             seed=self.cfg.dataset.seed,
             trial_mode=True,
-            trial_size=50  # Small size for testing
+            trial_size=50,  # Small size for testing
+            transform=None
         )
-        
-        train_dataset = dataset_fn(phase='train', transform=None)
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=self.cfg.hparams.batch_size,

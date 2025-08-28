@@ -189,7 +189,9 @@ class DDPBottleneckDiagnostic:
             # Find max batch size
             for batch_size in test_batches:
                 try:
+                    # Clean memory before each test
                     torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
                     
                     # Quick test with temporary model
                     temp_cfg = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
@@ -202,6 +204,7 @@ class DDPBottleneckDiagnostic:
                     model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
                     
                     # Get one batch and test
+                    batch_success = False
                     for batch in dataloader:
                         hs_cube, label, rgb = batch
                         hs_cube = preprocess_hsi(hs_cube)
@@ -215,18 +218,20 @@ class DDPBottleneckDiagnostic:
                         metrics = self.get_gpu_metrics(rank)
                         memory_gb = metrics.get('memory_used_gb', 0)
                         
-                        # All processes must agree on success
-                        success_tensor = torch.tensor([1.0], device=device)
-                        dist.all_reduce(success_tensor)
-                        
-                        if success_tensor.item() == world_size:
-                            max_batch = batch_size
-                            if rank == 0:
-                                print(f"  Batch {batch_size}: OK ({memory_gb:.1f}GB)")
+                        batch_success = True
+                        max_batch = batch_size
+                        if rank == 0:
+                            print(f"  Batch {batch_size}: OK ({memory_gb:.1f}GB)")
                         break
-                        
+                    
+                    # Clean up immediately after test
                     del model
+                    del hs_cube
                     torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    
+                    if not batch_success:
+                        break
                     
                 except Exception as e:
                     # Synchronize failure across processes
@@ -301,6 +306,10 @@ class DDPBottleneckDiagnostic:
                         # Send metrics to rank 0
                         dist.send(metrics, dst=0)
                     
+                    # Clean up GPU memory before next test
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    
                     # Synchronize before next test
                     dist.barrier()
             
@@ -352,6 +361,10 @@ class DDPBottleneckDiagnostic:
                                    preprocess_hsi) -> Dict:
         """Benchmark a specific configuration with DDP"""
         try:
+            # Clean GPU memory at start
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            
             # Update config
             test_cfg = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
             
@@ -542,6 +555,8 @@ class DDPBottleneckDiagnostic:
             
         except Exception as e:
             print(f"ERROR in benchmark_configuration_ddp: {str(e)}")
+            # Clean up memory on error
+            torch.cuda.empty_cache()
             return {
                 'data_rate': 0,
                 'forward_time': 0,
@@ -551,6 +566,9 @@ class DDPBottleneckDiagnostic:
                 'samples_per_sec': 0,
                 'epoch_time': 'ERROR'
             }
+        finally:
+            # Always clean up memory after each test
+            torch.cuda.empty_cache()
     
     def average_metrics(self, metrics_list: List[Dict]) -> Dict:
         """Average metrics across all GPUs"""

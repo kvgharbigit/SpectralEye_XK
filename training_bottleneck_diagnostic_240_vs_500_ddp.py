@@ -87,8 +87,17 @@ class DDPBottleneckDiagnostic:
                 'temperature': temp,
                 'power_w': power
             }
-        except:
-            return {}
+        except Exception as e:
+            # Return fallback values with debug info
+            return {
+                'gpu_util': 0,
+                'memory_util': 0,
+                'memory_used_gb': 0,
+                'memory_free_gb': 0,
+                'temperature': 0,
+                'power_w': 0,
+                'error': str(e)
+            }
     
     def setup_ddp(self, rank: int, world_size: int):
         """Initialize DDP process group exactly like training code"""
@@ -235,9 +244,9 @@ class DDPBottleneckDiagnostic:
                 print("Config               Data Load    Model FWD    Model BWD    GPU Util   Memory     Training/s   Total/s      Epoch(34k)   ")
                 print("-" * 125)
             
-            # Test each configuration
-            worker_configs = [1, 2, 4]
-            batch_configs = test_batches[:test_batches.index(max_batch)+1]
+            # Test each configuration (reduced workers to avoid issues)
+            worker_configs = [1, 2]  # Start with fewer workers
+            batch_configs = [1, 2, 4, 8]  # Test key batch sizes first
             
             best_config = None
             best_throughput = 0
@@ -354,9 +363,14 @@ class DDPBottleneckDiagnostic:
             test_cfg.dataloader.num_workers = num_workers
             
             # Create dataset
-            dataset_fn = instantiate(test_cfg.dataset)
-            datasets = dataset_fn(transform=None)
-            train_dataset = datasets[0]
+            try:
+                dataset_fn = instantiate(test_cfg.dataset)
+                datasets = dataset_fn(transform=None)
+                train_dataset = datasets[0]
+                print(f"Dataset created successfully, size: {len(train_dataset)}")
+            except Exception as e:
+                print(f"Dataset creation failed: {str(e)}")
+                raise e
             
             # Create distributed sampler
             sampler = DistributedSampler(
@@ -366,18 +380,35 @@ class DDPBottleneckDiagnostic:
                 shuffle=False
             )
             
-            # Create dataloader
-            dataloader = torch.utils.data.DataLoader(
-                train_dataset,
-                batch_size=batch_size,
-                num_workers=num_workers,
-                pin_memory=False,
-                prefetch_factor=2 if num_workers > 0 else None,
-                persistent_workers=num_workers > 1,
-                shuffle=False,
-                sampler=sampler,
-                timeout=60 if num_workers > 0 else 0
-            )
+            # Create dataloader with error handling
+            try:
+                # Ensure proper dataloader configuration
+                prefetch_factor = 2 if num_workers > 0 else None
+                persistent_workers = num_workers > 1
+                timeout = 60 if num_workers > 0 else 0
+                
+                print(f"Creating dataloader: batch_size={batch_size}, num_workers={num_workers}")
+                print(f"  prefetch_factor={prefetch_factor}, persistent_workers={persistent_workers}")
+                print(f"  timeout={timeout}, dataset_size={len(train_dataset)}")
+                
+                dataloader = torch.utils.data.DataLoader(
+                    train_dataset,
+                    batch_size=batch_size,
+                    num_workers=num_workers,
+                    pin_memory=False,  # Disabled for DDP
+                    prefetch_factor=prefetch_factor,
+                    persistent_workers=persistent_workers,
+                    shuffle=False,
+                    sampler=sampler,
+                    timeout=timeout,
+                    drop_last=True  # Ensure consistent batch sizes across processes
+                )
+                
+                print(f"Dataloader created successfully, length: {len(dataloader)}")
+                
+            except Exception as e:
+                print(f"Dataloader creation failed: {str(e)}")
+                raise e
             
             # Create model using instantiate (handles the model.model structure)
             model = instantiate(test_cfg.model.model).to(device)
@@ -394,59 +425,87 @@ class DDPBottleneckDiagnostic:
             backward_times = []
             gpu_utils = []
             
-            # Warmup
-            for i, batch in enumerate(dataloader):
-                if i >= 3:
+            # Warmup - single iteration only
+            try:
+                print(f"Starting warmup...")
+                for i, batch in enumerate(dataloader):
+                    if i >= 1:  # Just one warmup iteration
+                        break
+                    hs_cube, label, rgb = batch
+                    hs_cube = preprocess_hsi(hs_cube)
+                    hs_cube = hs_cube.to(device, non_blocking=True)
+                    output = model(hs_cube)
+                    if isinstance(output, tuple):
+                        loss = output[0]
+                    else:
+                        loss = output.mean()
+                    loss.backward()
+                    optimizer.step()
+                    optimizer.zero_grad()
+                    print(f"Warmup completed successfully")
                     break
-                hs_cube, label, rgb = batch
-                hs_cube = preprocess_hsi(hs_cube)
-                hs_cube = hs_cube.to(device, non_blocking=True)
-                output = model(hs_cube)
-                if isinstance(output, tuple):
-                    loss = output[0]
-                else:
-                    loss = output.mean()
-                loss.backward()
-                optimizer.step()
-                optimizer.zero_grad()
+            except Exception as e:
+                print(f"Warmup failed: {str(e)}")
+                raise e
             
             # Actual benchmark
             torch.cuda.synchronize()
-            for i, batch in enumerate(dataloader):
-                if i >= 10:  # Test 10 iterations
-                    break
-                
-                # Measure data loading
-                data_start = time.perf_counter()
-                hs_cube, label, rgb = batch
-                hs_cube = preprocess_hsi(hs_cube)
-                hs_cube = hs_cube.to(device, non_blocking=True)
-                torch.cuda.synchronize()
-                data_times.append(time.perf_counter() - data_start)
-                
-                # Measure forward pass
-                forward_start = time.perf_counter()
-                output = model(hs_cube)
-                if isinstance(output, tuple):
-                    loss = output[0]
-                else:
-                    loss = output.mean()
-                torch.cuda.synchronize()
-                forward_times.append(time.perf_counter() - forward_start)
-                
-                # Measure backward pass
-                backward_start = time.perf_counter()
-                loss.backward()
-                
-                # DDP synchronizes gradients here
-                optimizer.step()
-                optimizer.zero_grad()
-                torch.cuda.synchronize()
-                backward_times.append(time.perf_counter() - backward_start)
-                
-                # Get GPU utilization
-                gpu_metrics = self.get_gpu_metrics(rank)
-                gpu_utils.append(gpu_metrics.get('gpu_util', 0))
+            iteration_count = 0
+            
+            try:
+                for i, batch in enumerate(dataloader):
+                    if i >= 10:  # Test 10 iterations
+                        break
+                    
+                    iteration_count = i + 1
+                    
+                    # Measure data loading
+                    data_start = time.perf_counter()
+                    try:
+                        hs_cube, label, rgb = batch
+                        hs_cube = preprocess_hsi(hs_cube)
+                        hs_cube = hs_cube.to(device, non_blocking=True)
+                        torch.cuda.synchronize()
+                        data_times.append(time.perf_counter() - data_start)
+                    except Exception as e:
+                        print(f"Data loading error in iteration {i}: {str(e)}")
+                        raise e
+                    
+                    # Measure forward pass
+                    forward_start = time.perf_counter()
+                    try:
+                        output = model(hs_cube)
+                        if isinstance(output, tuple):
+                            loss = output[0]
+                        else:
+                            loss = output.mean()
+                        torch.cuda.synchronize()
+                        forward_times.append(time.perf_counter() - forward_start)
+                    except Exception as e:
+                        print(f"Forward pass error in iteration {i}: {str(e)}")
+                        raise e
+                    
+                    # Measure backward pass
+                    backward_start = time.perf_counter()
+                    try:
+                        loss.backward()
+                        
+                        # DDP synchronizes gradients here
+                        optimizer.step()
+                        optimizer.zero_grad()
+                        torch.cuda.synchronize()
+                        backward_times.append(time.perf_counter() - backward_start)
+                    except Exception as e:
+                        print(f"Backward pass error in iteration {i}: {str(e)}")
+                        raise e
+                    
+                    # Get GPU utilization
+                    gpu_metrics = self.get_gpu_metrics(rank)
+                    gpu_utils.append(gpu_metrics.get('gpu_util', 0))
+                    
+            except Exception as e:
+                print(f"Dataloader iteration failed after {iteration_count} iterations: {str(e)}")
+                raise e
             
             # Calculate metrics
             avg_data_time = np.mean(data_times)
@@ -482,6 +541,7 @@ class DDPBottleneckDiagnostic:
             }
             
         except Exception as e:
+            print(f"ERROR in benchmark_configuration_ddp: {str(e)}")
             return {
                 'data_rate': 0,
                 'forward_time': 0,

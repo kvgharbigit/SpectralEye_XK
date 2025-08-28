@@ -414,6 +414,44 @@ def copy_small_files_to_network(local_dir: str, run_name: str, rank: int = 0) ->
         logger.warning(f"Failed to copy files to network drive: {e}")
 
 
+def get_memory_info(device_id: int) -> dict:
+    """Get current GPU memory statistics"""
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        allocated = torch.cuda.memory_allocated(device_id) / 1e9
+        reserved = torch.cuda.memory_reserved(device_id) / 1e9
+        total = torch.cuda.get_device_properties(device_id).total_memory / 1e9
+        free = total - allocated
+        
+        # Try to get max allocated memory
+        try:
+            max_allocated = torch.cuda.max_memory_allocated(device_id) / 1e9
+        except:
+            max_allocated = allocated
+            
+        return {
+            'allocated_gb': allocated,
+            'reserved_gb': reserved,
+            'free_gb': free,
+            'total_gb': total,
+            'max_allocated_gb': max_allocated,
+            'utilization_pct': (allocated / total) * 100
+        }
+    return {}
+
+def log_memory_stats(rank: int, stage: str, device_id: int = None) -> None:
+    """Log memory statistics for debugging"""
+    if device_id is None:
+        device_id = rank
+    
+    mem_info = get_memory_info(device_id)
+    if mem_info:
+        logger.info(f"[Rank {rank}] MEMORY {stage}: "
+                   f"Allocated: {mem_info['allocated_gb']:.2f}GB, "
+                   f"Reserved: {mem_info['reserved_gb']:.2f}GB, "
+                   f"Free: {mem_info['free_gb']:.2f}GB, "
+                   f"Utilization: {mem_info['utilization_pct']:.1f}%")
+
 def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
     """
     Training function to be run in each process.
@@ -424,6 +462,9 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
     device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(cfg.general.seed)
     logger.info(f"[Rank {rank}] Running on device {device}")
+    
+    # Log initial memory state
+    log_memory_stats(rank, "INITIAL")
     
     # Set MLflow tracking URI in each process to ensure proper connection
     # This is critical for DDP as spawned processes don't inherit the MLflow context
@@ -459,14 +500,17 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
     dataset = get_datasets(cfg)
     dl_train = get_dataloaders(cfg, dataset[0], mode="train", use_ddp=cfg.general.use_ddp)
     dl_val   = get_dataloaders(cfg, dataset[1], mode="val", use_ddp=cfg.general.use_ddp)
+    log_memory_stats(rank, "AFTER DATASET LOAD")
 
     # Create the training module (this should include the model, optimizer, scheduler, etc.)
     train_module = create_training_module(cfg)
     train_module.model.to(device)
+    log_memory_stats(rank, "AFTER MODEL CREATION")
 
     # Wrap the model in DistributedDataParallel if using DDP
     if cfg.general.use_ddp:
         train_module.model = nn.parallel.DistributedDataParallel(train_module.model, device_ids=[rank])
+        log_memory_stats(rank, "AFTER DDP WRAP")
 
     # Import instantiate at the beginning
     from hydra.utils import instantiate
@@ -604,11 +648,44 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
     for epoch in range(1, nb_epochs + 1):
         epoch_info = EpochInfo(epoch, nb_epochs, cfg.hparams.batch_size * epoch)
 
+        # Log memory at start of epoch
+        if epoch == 1:
+            log_memory_stats(rank, "BEFORE FIRST EPOCH")
+        elif epoch % 10 == 0:
+            log_memory_stats(rank, f"EPOCH {epoch} START")
+
         # Training epoch
         train_module.model.train()
         loss, acc = run_one_epoch(epoch_info, train_module, dl_train, loss_fn, metric_fn, show_predictions, device, csv_path, rank)
         if rank == 0:
             logger.info(f"Epoch {epoch} TRAIN: Loss={loss:.4f}, Metric={acc:.4f}")
+            
+            # Add memory stats to CSV (only for rank 0)
+            if csv_path and device.type == "cuda":
+                mem_info = get_memory_info(0)
+                if mem_info:
+                    # Append memory info to CSV
+                    import pandas as pd
+                    try:
+                        df = pd.read_csv(csv_path)
+                        # Add memory columns if they don't exist
+                        if 'GPU_Memory_GB' not in df.columns:
+                            df['GPU_Memory_GB'] = None
+                            df['GPU_Reserved_GB'] = None
+                            df['GPU_Utilization_PCT'] = None
+                        
+                        # Update the last row with memory info
+                        df.loc[df.index[-1], 'GPU_Memory_GB'] = mem_info['allocated_gb']
+                        df.loc[df.index[-1], 'GPU_Reserved_GB'] = mem_info['reserved_gb'] 
+                        df.loc[df.index[-1], 'GPU_Utilization_PCT'] = mem_info['utilization_pct']
+                        
+                        df.to_csv(csv_path, index=False)
+                    except Exception as e:
+                        logger.debug(f"Could not add memory info to CSV: {e}")
+        
+        # Log memory after training epoch
+        if epoch == 1:
+            log_memory_stats(rank, "AFTER FIRST TRAIN EPOCH")
 
         # Validation loss calculation EVERY epoch (lightweight)
         train_module.model.eval()
@@ -618,6 +695,10 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
             val_loss, val_acc = run_one_epoch(epoch_info, train_module, dl_val, loss_fn, metric_fn, show_val_predictions, device, csv_path, rank)
         if rank == 0:
             logger.info(f"Epoch {epoch} VAL: Loss={val_loss:.4f}, Metric={val_acc:.4f}")
+        
+        # Log memory after validation epoch
+        if epoch == 1:
+            log_memory_stats(rank, "AFTER FIRST VAL EPOCH")
 
         # (Optional) Step the scheduler
         if hasattr(train_module, "scheduler") and train_module.scheduler:
@@ -644,7 +725,30 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
         
         # Clean up memory before synchronization
         if device.type == "cuda":
+            # Log memory before cleanup (periodically)
+            if epoch % 10 == 0:
+                log_memory_stats(rank, f"EPOCH {epoch} BEFORE CLEANUP")
+            
             torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            
+            # Log memory after cleanup (periodically)
+            if epoch % 10 == 0:
+                log_memory_stats(rank, f"EPOCH {epoch} AFTER CLEANUP")
+            
+            # Check for memory leaks
+            mem_info = get_memory_info(rank)
+            if mem_info and epoch == 1:
+                # Store initial memory usage after first epoch
+                if not hasattr(run_training, '_initial_memory'):
+                    run_training._initial_memory = mem_info['allocated_gb']
+            elif mem_info and epoch % 10 == 0:
+                # Check if memory is growing
+                initial = getattr(run_training, '_initial_memory', 0)
+                growth = mem_info['allocated_gb'] - initial
+                if growth > 1.0:  # More than 1GB growth
+                    logger.warning(f"[Rank {rank}] Potential memory leak detected! "
+                                 f"Memory growth: {growth:.2f}GB since epoch 1")
         
         # Synchronize all processes at the end of each epoch
         if cfg.general.use_ddp:
@@ -658,9 +762,38 @@ def run_training(rank: int, world_size: int, cfg: DictConfig) -> None:
         run_name = os.path.basename(output_dir)
         copy_small_files_to_network(output_dir, run_name, rank)
     
+    # Log final memory stats
+    log_memory_stats(rank, "TRAINING COMPLETE")
+    
+    # Memory summary
+    mem_info = get_memory_info(rank)
+    if mem_info and rank == 0:
+        logger.info("=" * 60)
+        logger.info("MEMORY USAGE SUMMARY")
+        logger.info("=" * 60)
+        logger.info(f"Final allocated: {mem_info['allocated_gb']:.2f}GB")
+        logger.info(f"Max allocated: {mem_info['max_allocated_gb']:.2f}GB")
+        logger.info(f"GPU total: {mem_info['total_gb']:.2f}GB")
+        logger.info(f"Peak utilization: {(mem_info['max_allocated_gb'] / mem_info['total_gb']) * 100:.1f}%")
+        
+        # Calculate if we could use larger batch size
+        free_memory_at_peak = mem_info['total_gb'] - mem_info['max_allocated_gb']
+        logger.info(f"Free memory at peak: {free_memory_at_peak:.2f}GB")
+        
+        # Rough estimate - each batch size increment uses ~700MB based on your test
+        possible_batch_increase = int(free_memory_at_peak / 0.7)
+        if possible_batch_increase > 0:
+            logger.info(f"Could potentially increase batch size by: {possible_batch_increase}")
+        logger.info("=" * 60)
+    
     # End MLflow run if we started one
     if rank == 0 and mlflow_run:
         mlflow.end_run()
+    
+    # Final memory cleanup
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
     
     # Clean up distributed processes if using DDP
     if cfg.general.use_ddp:

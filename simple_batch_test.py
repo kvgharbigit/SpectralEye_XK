@@ -76,7 +76,12 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
         cfg.dataloader.num_workers = workers
         
         # Override dataset if needed
-        if dataset_config != cfg.defaults.dataset[0]:
+        try:
+            current_dataset = cfg.defaults.dataset[0] if hasattr(cfg, 'defaults') and hasattr(cfg.defaults, 'dataset') else None
+        except:
+            current_dataset = None
+            
+        if dataset_config != current_dataset:
             # Update dataset configuration
             with initialize(version_base=None, config_path="model_training/conf/dataset"):
                 dataset_cfg = compose(config_name=dataset_config)

@@ -300,9 +300,7 @@ class DDPBottleneckDiagnostic:
                 print(f"\nBest configuration: {best_config['config']} "
                       f"({best_config['total_throughput']:.1f} samples/s)")
                 
-                # Store results if queue is available
-                if hasattr(cfg, '_result_queue'):
-                    cfg._result_queue.put(best_config)
+                # Results are displayed inline above
             
             # Clean up
             self.cleanup_ddp()
@@ -568,10 +566,6 @@ class DDPBottleneckDiagnostic:
                 
                 # Use multiprocessing queue for results
                 result_queue = mp.Queue()
-                config_results_queue = mp.Queue()
-                
-                # Store results for analysis
-                test_cfg._result_queue = config_results_queue
                 
                 # Spawn processes
                 mp.spawn(
@@ -587,66 +581,34 @@ class DDPBottleneckDiagnostic:
                     if result != "DONE":
                         self.log_both(f"Error testing {model_name}: {result}")
                     else:
-                        # Collect performance results if available
-                        try:
-                            while not config_results_queue.empty():
-                                perf_result = config_results_queue.get_nowait()
-                                key = f"{model_name}_{spatial_size}"
-                                if key not in best_configs_by_gpu:
-                                    best_configs_by_gpu[key] = perf_result
-                                elif perf_result['total_throughput'] > best_configs_by_gpu[key]['total_throughput']:
-                                    best_configs_by_gpu[key] = perf_result
-                                
-                                # Store for global summary
-                                if key not in self.all_results:
-                                    self.all_results[key] = {}
-                                self.all_results[key][num_gpus] = {
-                                    'throughput': perf_result['total_throughput'],
-                                    'workers': perf_result['workers'],
-                                    'batch': perf_result['batch_size'],
-                                    'gpu_util': perf_result['gpu_util']
-                                }
-                        except:
-                            pass
+                        # Just log that the test completed successfully
+                        key = f"{model_name}_{spatial_size}"
+                        self.log_both(f"✓ Completed {key} with {num_gpus} GPU(s)")
                 except:
                     self.log_both(f"Timeout testing {model_name} with {num_gpus} GPUs")
                 
                 # Add some spacing between tests
                 self.log_both("")
             
-            # Print optimal configurations for this GPU count
-            self.log_both(f"\n=== OPTIMAL CONFIGURATIONS FOR {num_gpus} GPU{'s' if num_gpus > 1 else ''} ===")
-            for config_key, perf_data in best_configs_by_gpu.items():
-                if 'config' in perf_data:
-                    self.log_both(f"{config_key}: Workers={perf_data['workers']}, "
-                                 f"Batch={perf_data['batch_size']}, "
-                                 f"Throughput={perf_data['total_throughput']:.1f} samples/s")
+            # Best configurations are shown inline in each test above
+            self.log_both(f"\n=== {num_gpus} GPU TESTING COMPLETED ===")
+            self.log_both("Check individual test results above for best configurations per model.")
         
         # Summary analysis
         self.log_both(f"\n{'='*80}")
         self.log_both("SUMMARY ANALYSIS")
         self.log_both(f"{'='*80}")
         
-        # Print optimization summary table
-        self.log_both("\n=== OPTIMIZATION SUMMARY TABLE ===")
-        self.log_both("\nBest configurations by model and GPU count:")
-        self.log_both("-" * 100)
-        self.log_both(f"{'Model':<20} {'GPUs':<6} {'Workers':<8} {'Batch':<7} {'Throughput':<12} {'GPU Util':<10} {'Scaling':<10}")
-        self.log_both("-" * 100)
-        
-        # Analyze and display results if we have any
-        if hasattr(self, 'all_results') and self.all_results:
-            for model_key in sorted(self.all_results.keys()):
-                baseline_throughput = self.all_results[model_key].get(1, {}).get('throughput', 1)
-                for gpu_count in sorted(self.all_results[model_key].keys()):
-                    config = self.all_results[model_key][gpu_count]
-                    scaling = config['throughput'] / baseline_throughput if baseline_throughput > 0 else 0
-                    self.log_both(f"{model_key:<20} {gpu_count:<6} {config['workers']:<8} "
-                                 f"{config['batch']:<7} {config['throughput']:<12.1f} "
-                                 f"{config['gpu_util']:<10.1f} {scaling:<10.2f}x")
-        else:
-            self.log_both("No performance data collected for summary table.")
-            self.log_both("Check individual test results above for optimal configurations.")
+        # Print summary guidance
+        self.log_both("\n=== OPTIMIZATION GUIDANCE ===")
+        self.log_both("\nTo analyze your results, look for:")
+        self.log_both("1. Best configurations printed after each model test")
+        self.log_both("2. Total throughput (Total/s) scaling patterns:")
+        self.log_both("   - 1 GPU → 2 GPUs: Should roughly double")
+        self.log_both("   - 2 GPUs → 3 GPUs: Should increase by ~50%")
+        self.log_both("   - If throughput plateaus = I/O bottleneck confirmed")
+        self.log_both("3. Data Load rates: Should stay consistent across GPU counts")
+        self.log_both("4. GPU Utilization: Should stay >80% if no I/O starvation")
         
         self.log_both("\nKey findings:")
         self.log_both("1. Data Load Rate: Check if it decreases with more GPUs (F: drive bottleneck)")

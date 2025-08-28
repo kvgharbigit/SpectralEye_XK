@@ -187,6 +187,29 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
             print(f"{{model_name}}_{{world_size}}GPU_w{{workers}}_b{{batch_size}}: ERROR - {{str(e)}}")
     
     finally:
+        # Aggressive cleanup before process ends
+        try:
+            if 'model' in locals():
+                del model
+            if 'optimizer' in locals():
+                del optimizer
+            if 'dataloader' in locals():
+                del dataloader
+            if 'train_dataset' in locals():
+                del train_dataset
+            
+            # Force garbage collection
+            import gc
+            gc.collect()
+            
+            # Multiple CUDA cache clears
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            
+        except:
+            pass
+            
         if dist.is_initialized():
             dist.destroy_process_group()
 

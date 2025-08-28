@@ -179,12 +179,8 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
             samples_per_sec = batch_size / (avg_forward_time/1000 + avg_backward_time/1000)
             total_throughput = samples_per_sec * world_size
             
-            print(f"{{model_name}}_{{world_size}}GPU_w{{workers}}_b{{batch_size}}: "
-                  f"Data={{data_rate:.1f}}/s, "
-                  f"Forward={{avg_forward_time:.1f}}ms, "
-                  f"Backward={{avg_backward_time:.1f}}ms, "
-                  f"Training={{samples_per_sec:.1f}}/s, "
-                  f"Total={{total_throughput:.1f}}/s")
+            result_line = f"{{model_name}}_{{world_size}}GPU_w{{workers}}_b{{batch_size}}: Data={{data_rate:.1f}}/s, Forward={{avg_forward_time:.1f}}ms, Backward={{avg_backward_time:.1f}}ms, Training={{samples_per_sec:.1f}}/s, Total={{total_throughput:.1f}}/s"
+            print(result_line)
                   
     except Exception as e:
         if rank == 0:
@@ -209,12 +205,18 @@ if __name__ == "__main__":
                               capture_output=True, text=True, timeout=300)
         
         output = result.stdout.strip()
+        error_output = result.stderr.strip()
+        
+        print(f"DEBUG - Return code: {result.returncode}")
+        print(f"DEBUG - STDOUT: '{output}'")
+        print(f"DEBUG - STDERR: '{error_output}'")
+        
         if output:
             print(output)
             return output
         
-        if result.stderr.strip() and "RequestsDependencyWarning" not in result.stderr:
-            error_msg = f"STDERR: {result.stderr.strip()}"
+        if error_output and "RequestsDependencyWarning" not in error_output:
+            error_msg = f"STDERR: {error_output}"
             print(error_msg)
             return f"ERROR: {error_msg}"
             
@@ -287,34 +289,51 @@ def main():
                 # Parse result and save to CSV
                 if result and "ERROR" not in result and "TIMEOUT" not in result:
                     try:
-                        # Extract metrics from result string
-                        parts = result.split(": ")[1].split(", ")
-                        data_rate = float(parts[0].split("=")[1].replace("/s", ""))
-                        forward_time = float(parts[1].split("=")[1].replace("ms", ""))
-                        backward_time = float(parts[2].split("=")[1].replace("ms", ""))
-                        training_rate = float(parts[3].split("=")[1].replace("/s", ""))
-                        total_throughput = float(parts[4].split("=")[1].replace("/s", ""))
+                        # Simple parsing - look for numbers after = signs
+                        data_rate = 0
+                        forward_time = 0
+                        backward_time = 0
+                        training_rate = 0
+                        total_throughput = 0
+                        
+                        # Extract Data rate
+                        if "Data=" in result:
+                            data_part = result.split("Data=")[1].split("/s")[0]
+                            data_rate = float(data_part)
+                        
+                        # Extract Forward time
+                        if "Forward=" in result:
+                            forward_part = result.split("Forward=")[1].split("ms")[0]
+                            forward_time = float(forward_part)
+                        
+                        # Extract Backward time
+                        if "Backward=" in result:
+                            backward_part = result.split("Backward=")[1].split("ms")[0]
+                            backward_time = float(backward_part)
+                        
+                        # Extract Training rate
+                        if "Training=" in result:
+                            training_part = result.split("Training=")[1].split("/s")[0]
+                            training_rate = float(training_part)
+                        
+                        # Extract Total throughput
+                        if "Total=" in result:
+                            total_part = result.split("Total=")[1].split("/s")[0]
+                            total_throughput = float(total_part)
                         
                         # Calculate training speed estimates
-                        # Assume dataset sizes based on resolution
                         if "240" in resolution:
-                            dataset_size = 49000  # Approximate 240x240 dataset size
+                            dataset_size = 49000
                         else:
-                            dataset_size = 34000  # Approximate 500x500 dataset size
+                            dataset_size = 34000
                         
-                        # Calculate epoch time in minutes
                         if total_throughput > 0:
                             epoch_seconds = dataset_size / total_throughput
                             epoch_minutes = epoch_seconds / 60
-                            
-                            # Format epoch time
                             if epoch_minutes < 60:
                                 epoch_time = f"{epoch_minutes:.1f}min"
                             else:
-                                epoch_hours = epoch_minutes / 60
-                                epoch_time = f"{epoch_hours:.1f}hr"
-                            
-                            # Calculate samples per hour
+                                epoch_time = f"{epoch_minutes/60:.1f}hr"
                             samples_per_hour = total_throughput * 3600
                         else:
                             epoch_time = "N/A"
@@ -325,8 +344,8 @@ def main():
                             f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},"
                                    f"{data_rate},{forward_time},{backward_time},"
                                    f"{training_rate},{total_throughput},{epoch_time},{samples_per_hour:.0f},SUCCESS\\n")
-                    except:
-                        # If parsing fails, just mark as completed
+                    except Exception as parse_error:
+                        log_both(f"      Parse error: {parse_error}, result was: {result}")
                         with open(csv_file, 'a') as f:
                             f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},"
                                    f"0,0,0,0,0,N/A,0,PARSE_ERROR\\n")

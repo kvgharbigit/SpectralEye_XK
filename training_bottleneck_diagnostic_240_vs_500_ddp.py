@@ -49,7 +49,7 @@ from model_training.losses.custom_loss import CustomLoss
 
 
 class DDPBottleneckDiagnostic:
-    """Comprehensive diagnostic comparing 240x240 vs 500x500 configurations with actual DDP"""
+    """Comprehensive diagnostic comparing 240x240 vs 500x500 configurations with actual DDP and gradient checkpointing"""
     
     def __init__(self, base_cfg: DictConfig):
         self.base_cfg = base_cfg
@@ -247,8 +247,8 @@ class DDPBottleneckDiagnostic:
             if rank == 0:
                 print(f"\n=== MODEL PERFORMANCE TESTING ({spatial_size}x{spatial_size}) - {model_name.upper()} - DDP {world_size} GPUs ===")
                 print(f"Testing batch sizes: {test_batches[:test_batches.index(max_batch)+1]} (per-GPU)")
-                print("Config               Data Load    Model FWD    Model BWD    GPU Util   Memory     Training/s   Total/s      Epoch(34k)   ")
-                print("-" * 125)
+                print("Config               GradChk   Data Load    Model FWD    Model BWD    GPU Util   Memory     Training/s   Total/s      Epoch(34k)   ")
+                print("-" * 135)
             
             # Test each configuration
             worker_configs = [1, 2]  # Reduced workers to avoid issues
@@ -281,9 +281,10 @@ class DDPBottleneckDiagnostic:
                         # Average metrics across GPUs
                         avg_metrics = self.average_metrics(all_metrics)
                         
-                        # Display results
+                        # Display results with gradient checkpointing status
                         total_throughput = avg_metrics['samples_per_sec'] * world_size
-                        print(f"\r{config_name:<20} {avg_metrics['data_rate']:<12.1f} "
+                        grad_chk = "YES" if cfg.hparams.get('use_gradient_checkpointing', False) else "NO"
+                        print(f"\r{config_name:<20} {grad_chk:<9} {avg_metrics['data_rate']:<12.1f} "
                               f"{avg_metrics['forward_time']:<12.1f} "
                               f"{avg_metrics['backward_time']:<12.1f} "
                               f"{avg_metrics['gpu_util']:<10.0f} "
@@ -671,17 +672,29 @@ class DDPBottleneckDiagnostic:
             # Track best configurations for this GPU count
             best_configs_by_gpu = {}
             
-            for spatial_size, model_name, dataset_path in configs_to_test:
-                # Update config for this test
-                test_cfg = OmegaConf.create(OmegaConf.to_container(self.base_cfg, resolve=True))
-                test_cfg.model.name = model_name
-                test_cfg.dataset.csv_path = dataset_path
+            # Test gradient checkpointing variants
+            checkpoint_configs = [
+                (False, "No Gradient Checkpointing"),
+                (True, "With Gradient Checkpointing")
+            ]
+            
+            for use_checkpointing, checkpoint_desc in checkpoint_configs:
+                self.log_both(f"\n--- Testing {checkpoint_desc} ---")
                 
-                # CRITICAL: Disable trial mode for realistic performance testing
-                test_cfg.dataset.trial_mode = False
-                test_cfg.dataset.trial_size = 1000  # Not used when trial_mode=False
-                
-                # Ensure proper dataloader settings (keep existing structure)
+                for spatial_size, model_name, dataset_path in configs_to_test:
+                    # Update config for this test
+                    test_cfg = OmegaConf.create(OmegaConf.to_container(self.base_cfg, resolve=True))
+                    test_cfg.model.name = model_name
+                    test_cfg.dataset.csv_path = dataset_path
+                    
+                    # Set gradient checkpointing
+                    test_cfg.hparams.use_gradient_checkpointing = use_checkpointing
+                    
+                    # CRITICAL: Disable trial mode for realistic performance testing
+                    test_cfg.dataset.trial_mode = False
+                    test_cfg.dataset.trial_size = 1000  # Not used when trial_mode=False
+                    
+                    # Ensure proper dataloader settings (keep existing structure)
                 if not hasattr(test_cfg.dataloader, 'pin_memory'):
                     test_cfg.dataloader.pin_memory = False  # Disabled for DDP
                 if not hasattr(test_cfg.dataloader, 'prefetch_factor'):
@@ -697,31 +710,31 @@ class DDPBottleneckDiagnostic:
                     test_cfg.model.model.spatial_patch_size = 25
                     test_cfg.model.model.img_size = 500
                 
-                # Use multiprocessing queue for results
-                result_queue = mp.Queue()
-                
-                # Spawn processes
-                mp.spawn(
-                    self.test_configuration_ddp,
-                    args=(num_gpus, test_cfg, spatial_size, model_name, result_queue),
-                    nprocs=num_gpus,
-                    join=True
-                )
-                
-                # Get result
-                try:
-                    result = result_queue.get(timeout=300)
-                    if result != "DONE":
-                        self.log_both(f"Error testing {model_name}: {result}")
-                    else:
-                        # Just log that the test completed successfully
-                        key = f"{model_name}_{spatial_size}"
-                        self.log_both(f"✓ Completed {key} with {num_gpus} GPU(s)")
-                except:
-                    self.log_both(f"Timeout testing {model_name} with {num_gpus} GPUs")
-                
-                # Add some spacing between tests
-                self.log_both("")
+                    # Use multiprocessing queue for results
+                    result_queue = mp.Queue()
+                    
+                    # Spawn processes
+                    mp.spawn(
+                        self.test_configuration_ddp,
+                        args=(num_gpus, test_cfg, spatial_size, model_name, result_queue),
+                        nprocs=num_gpus,
+                        join=True
+                    )
+                    
+                    # Get result
+                    try:
+                        result = result_queue.get(timeout=300)
+                        if result != "DONE":
+                            self.log_both(f"Error testing {model_name} with {checkpoint_desc}: {result}")
+                        else:
+                            # Just log that the test completed successfully
+                            key = f"{model_name}_{spatial_size}"
+                            self.log_both(f"✓ Completed {key} with {checkpoint_desc} and {num_gpus} GPU(s)")
+                    except:
+                        self.log_both(f"Timeout testing {model_name} with {checkpoint_desc} and {num_gpus} GPUs")
+                    
+                    # Add some spacing between tests
+                    self.log_both("")
             
             # Best configurations are shown inline in each test above
             self.log_both(f"\n=== {num_gpus} GPU TESTING COMPLETED ===")

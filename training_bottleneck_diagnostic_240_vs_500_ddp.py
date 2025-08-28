@@ -9,6 +9,7 @@ os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 os.environ["TORCH_DISTRIBUTED_USE_LIBUV"] = "0"
 os.environ["USE_LIBUV"] = "0"
 os.environ["GLOO_SOCKET_IFNAME"] = ""
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 import sys
 from pathlib import Path
@@ -249,9 +250,9 @@ class DDPBottleneckDiagnostic:
                 print("Config               Data Load    Model FWD    Model BWD    GPU Util   Memory     Training/s   Total/s      Epoch(34k)   ")
                 print("-" * 125)
             
-            # Test each configuration (reduced workers to avoid issues)
-            worker_configs = [1, 2]  # Start with fewer workers
-            batch_configs = [1, 2, 4, 8]  # Test key batch sizes first
+            # Test each configuration
+            worker_configs = [1, 2]  # Reduced workers to avoid issues
+            batch_configs = [1, 2, 4, 8]  # Key batch sizes
             
             best_config = None
             best_throughput = 0
@@ -310,6 +311,9 @@ class DDPBottleneckDiagnostic:
                     torch.cuda.empty_cache()
                     torch.cuda.synchronize()
                     
+                    # Small delay to ensure cleanup completes
+                    time.sleep(1)
+                    
                     # Synchronize before next test
                     dist.barrier()
             
@@ -364,6 +368,23 @@ class DDPBottleneckDiagnostic:
             # Clean GPU memory at start
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
+            
+            # Check available memory
+            total_memory = torch.cuda.get_device_properties(device).total_memory / 1e9
+            allocated_memory = torch.cuda.memory_allocated(device) / 1e9
+            cached_memory = torch.cuda.memory_reserved(device) / 1e9
+            free_memory = total_memory - allocated_memory
+            
+            print(f"GPU {rank} Memory: {allocated_memory:.1f}GB allocated, {cached_memory:.1f}GB cached, {free_memory:.1f}GB free")
+            
+            if free_memory < 1.0:  # Less than 1GB free
+                print(f"WARNING: Low memory on GPU {rank}. Forcing aggressive cleanup...")
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                # Force garbage collection
+                import gc
+                gc.collect()
+                torch.cuda.empty_cache()
             
             # Update config
             test_cfg = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
@@ -424,10 +445,15 @@ class DDPBottleneckDiagnostic:
                 raise e
             
             # Create model using instantiate (handles the model.model structure)
-            model = instantiate(test_cfg.model.model).to(device)
-            
-            # Wrap with DDP
-            model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
+            try:
+                model = instantiate(test_cfg.model.model).to(device)
+                
+                # Wrap with DDP
+                model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
+                print(f"Model created and wrapped with DDP successfully")
+            except Exception as e:
+                print(f"Model creation failed: {str(e)}")
+                raise e
             
             # Create optimizer
             optimizer = torch.optim.AdamW(model.parameters(), lr=test_cfg.optimizer.lr)
@@ -543,7 +569,7 @@ class DDPBottleneckDiagnostic:
             final_metrics = self.get_gpu_metrics(rank)
             memory_gb = final_metrics.get('memory_used_gb', 0)
             
-            return {
+            result = {
                 'data_rate': data_rate,
                 'forward_time': avg_forward_time,
                 'backward_time': avg_backward_time,
@@ -552,6 +578,16 @@ class DDPBottleneckDiagnostic:
                 'samples_per_sec': samples_per_sec,
                 'epoch_time': epoch_time
             }
+            
+            # Explicit cleanup before returning
+            del model
+            del optimizer
+            del dataloader
+            del train_dataset
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            
+            return result
             
         except Exception as e:
             print(f"ERROR in benchmark_configuration_ddp: {str(e)}")
@@ -568,7 +604,27 @@ class DDPBottleneckDiagnostic:
             }
         finally:
             # Always clean up memory after each test
-            torch.cuda.empty_cache()
+            try:
+                # More aggressive cleanup
+                if 'model' in locals():
+                    del model
+                if 'optimizer' in locals():
+                    del optimizer
+                if 'dataloader' in locals():
+                    del dataloader
+                if 'train_dataset' in locals():
+                    del train_dataset
+                
+                # Force garbage collection
+                import gc
+                gc.collect()
+                
+                # Clear CUDA cache multiple times
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+            except:
+                pass
     
     def average_metrics(self, metrics_list: List[Dict]) -> Dict:
         """Average metrics across all GPUs"""

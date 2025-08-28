@@ -285,6 +285,15 @@ def main():
                 
                 result = run_single_test(model_name, workers, batch_size, gpu_count, dataset_config)
                 
+                # Force GPU memory cleanup between tests
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                
+                # Small delay to ensure cleanup
+                time.sleep(3)
+                
                 # Log result immediately
                 log_both(f"    {batch_size}: {result if result else 'No output'}")
                 

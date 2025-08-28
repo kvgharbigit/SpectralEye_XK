@@ -60,15 +60,15 @@ class DDPBottleneckDiagnostic:
         pynvml.nvmlInit()
         self.results = {}
         self.all_results = {}  # Track results across all tests
-        self.text_file = None
         
     def log_both(self, message: str, rank: int = 0):
         """Log message to both console and text file (only from rank 0)"""
         if rank == 0:
             print(message)
-            if self.text_file:
-                self.text_file.write(message + '\n')
-                self.text_file.flush()
+            # Write to file if output_file is set
+            if hasattr(self, 'output_file'):
+                with open(self.output_file, 'a') as f:
+                    f.write(message + '\n')
         
     def get_gpu_metrics(self, device_id: int) -> Dict:
         """Get current GPU metrics"""
@@ -505,9 +505,8 @@ class DDPBottleneckDiagnostic:
     
     def run_diagnostic(self):
         """Run the complete diagnostic with DDP"""
-        # Create output file
-        output_file = self.output_dir / f'ddp_diagnostic_{self.timestamp}.txt'
-        self.text_file = open(output_file, 'w')
+        # Create output file path (but don't open yet)
+        self.output_file = self.output_dir / f'ddp_diagnostic_{self.timestamp}.txt'
         
         self.log_both("=== COMPREHENSIVE 240x240 vs 500x500 DDP COMPARISON ===")
         self.log_both(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -621,8 +620,7 @@ class DDPBottleneckDiagnostic:
         self.log_both("   - More workers may increase disk contention")
         
         self.log_both(f"\nCompleted at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        self.text_file.close()
-        print(f"\nResults saved to: {output_file}")
+        print(f"\nResults saved to: {self.output_file}")
 
 
 @hydra.main(version_base="1.3", config_path="model_training/conf", config_name="full_run_240")

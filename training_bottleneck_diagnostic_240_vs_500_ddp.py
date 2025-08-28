@@ -160,14 +160,14 @@ class DDPBottleneckDiagnostic:
             # Create dataloader with actual training parameters
             dataloader = torch.utils.data.DataLoader(
                 train_dataset,
-                batch_size=cfg.dataloader.train.batch_size,  # Per-GPU batch size
-                num_workers=cfg.dataloader.train.num_workers,
-                pin_memory=False,  # Disabled in DDP per config
-                prefetch_factor=2 if cfg.dataloader.train.num_workers > 0 else None,
-                persistent_workers=cfg.dataloader.train.num_workers > 1,
+                batch_size=cfg.hparams.batch_size,  # Per-GPU batch size
+                num_workers=cfg.dataloader.num_workers,
+                pin_memory=cfg.dataloader.pin_memory if hasattr(cfg.dataloader, 'pin_memory') else False,
+                prefetch_factor=cfg.dataloader.prefetch_factor if cfg.dataloader.num_workers > 0 else None,
+                persistent_workers=cfg.dataloader.persistent_workers if cfg.dataloader.num_workers > 1 else False,
                 shuffle=False,
                 sampler=sampler,
-                timeout=60 if cfg.dataloader.train.num_workers > 0 else 0
+                timeout=60 if cfg.dataloader.num_workers > 0 else 0
             )
             
             # Test different batch sizes
@@ -184,7 +184,7 @@ class DDPBottleneckDiagnostic:
                     
                     # Quick test with temporary model
                     temp_cfg = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
-                    temp_cfg.dataloader.train.batch_size = batch_size
+                    temp_cfg.hparams.batch_size = batch_size
                     
                     # Create model using instantiate (handles the model.model structure)
                     model = instantiate(temp_cfg.model.model).to(device)
@@ -352,8 +352,8 @@ class DDPBottleneckDiagnostic:
             test_cfg.dataset.trial_mode = False
             
             # Update test parameters
-            test_cfg.dataloader.train.batch_size = batch_size
-            test_cfg.dataloader.train.num_workers = num_workers
+            test_cfg.hparams.batch_size = batch_size
+            test_cfg.dataloader.num_workers = num_workers
             
             # Create dataset
             dataset_fn = instantiate(test_cfg.dataset)
@@ -514,8 +514,8 @@ class DDPBottleneckDiagnostic:
         self.log_both("=== COMPREHENSIVE 240x240 vs 500x500 DDP COMPARISON ===")
         self.log_both(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         self.log_both(f"Data path: {self.base_cfg.dataset.csv_path}")
-        self.log_both(f"Base configuration: {self.base_cfg.dataloader.train.batch_size} batch, "
-                     f"{self.base_cfg.dataloader.train.num_workers} workers")
+        self.log_both(f"Base configuration: {self.base_cfg.hparams.batch_size} batch, "
+                     f"{self.base_cfg.dataloader.num_workers} workers")
         self.log_both(f"Available GPUs: {torch.cuda.device_count()}\n")
         
         # Test configurations
@@ -550,17 +550,13 @@ class DDPBottleneckDiagnostic:
                 test_cfg.dataset.trial_mode = False
                 test_cfg.dataset.trial_size = 1000  # Not used when trial_mode=False
                 
-                # Use proper dataloader settings from training
-                test_cfg.dataloader = OmegaConf.create({
-                    'train': {
-                        'batch_size': 2,  # Will be overridden in testing loop
-                        'num_workers': 2,  # Will be overridden in testing loop
-                        'pin_memory': False,  # Disabled for DDP
-                        'prefetch_factor': 4,
-                        'persistent_workers': True,
-                        'shuffle': False  # Handled by DistributedSampler
-                    }
-                })
+                # Ensure proper dataloader settings (keep existing structure)
+                if not hasattr(test_cfg.dataloader, 'pin_memory'):
+                    test_cfg.dataloader.pin_memory = False  # Disabled for DDP
+                if not hasattr(test_cfg.dataloader, 'prefetch_factor'):
+                    test_cfg.dataloader.prefetch_factor = 4
+                if not hasattr(test_cfg.dataloader, 'persistent_workers'):
+                    test_cfg.dataloader.persistent_workers = True
                 
                 # Adjust patch sizes based on spatial size
                 if spatial_size == 240:

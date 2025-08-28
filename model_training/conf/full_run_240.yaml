@@ -22,10 +22,10 @@ general:
   use_ddp: true
   parallel:
     use_parallel: true
-    device_ids: [0, 1, 2]
+    device_ids: [0, 1]
 
 # Optimized data loading for 240x240 (smaller files load faster)
 dataloader:
-  num_workers: 8  # Increased from default 2
+  num_workers: 2  # Increased from default 2
   pin_memory: true
   prefetch_factor: 4  # Increased from default 2

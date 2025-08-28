@@ -12,6 +12,7 @@ hparams:
   nb_epochs: 250
   lr: 0.0001
   valid_interval: 10  # Validation every 10 epochs for long training
+  use_gradient_checkpointing: false
 
 # Full dataset training
 dataset:

@@ -3,6 +3,7 @@ from functools import partial
 import torch
 import torch.nn as nn
 from torch.nn import LayerNorm
+from torch.utils.checkpoint import checkpoint
 
 
 def calculate_metrics_per_pixel(original_spectrum, reconstructed_spectrum):
@@ -204,6 +205,7 @@ class EncoderVit(nn.Module):
             encoder_num_heads=16,
             mlp_ratio=4.0,
             mask_ratio=0.9,
+            use_gradient_checkpointing=False,
     ):
         super().__init__()
         self.img_size = (img_size, img_size)
@@ -228,6 +230,7 @@ class EncoderVit(nn.Module):
 
         self.mlp_ratio = mlp_ratio
         self.mask_ratio = mask_ratio
+        self.use_gradient_checkpointing = use_gradient_checkpointing
 
         self.encoder_cls_token = nn.Parameter(torch.zeros(1, 1, self.encoder_embed_dim))
 
@@ -372,7 +375,10 @@ class EncoderVit(nn.Module):
 
         # apply Transformer blocks
         for blk in self.blocks:
-            x = blk(x)
+            if self.use_gradient_checkpointing and self.training:
+                x = checkpoint(blk, x, use_reentrant=False)
+            else:
+                x = blk(x)
         x = self.norm(x)
         x_cls = x[:, 0, :]
         x = x[:, 1:, :]
@@ -396,6 +402,7 @@ class DecoderVit(nn.Module):
             depth=4,
             num_heads=16,
             mlp_ratio=4.0,
+            use_gradient_checkpointing=False,
     ):
         super().__init__()
         self.img_size = (img_size, img_size)
@@ -410,6 +417,7 @@ class DecoderVit(nn.Module):
         self.depth = depth
         self.num_heads = num_heads
         self.mlp_ratio = mlp_ratio
+        self.use_gradient_checkpointing = use_gradient_checkpointing
 
         # self.decoder_cls_token = nn.Parameter(torch.zeros(1, 1, self.decoder_embed_dim))
 
@@ -548,7 +556,10 @@ class DecoderVit(nn.Module):
 
         # apply Transformer blocks
         for blk in self.decoder_blocks:
-            x = blk(x)
+            if self.use_gradient_checkpointing and self.training:
+                x = checkpoint(blk, x, use_reentrant=False)
+            else:
+                x = blk(x)
         x = self.decoder_norm(x)
 
         # predictor projection
@@ -579,6 +590,7 @@ class MaskedAutoencoderViT(nn.Module):
             decoder_num_heads=16,
             mlp_ratio=4.0,
             mask_ratio=0.9,
+            use_gradient_checkpointing=False,
     ):
         super().__init__()
         self.encoder = EncoderVit(
@@ -592,6 +604,7 @@ class MaskedAutoencoderViT(nn.Module):
             encoder_num_heads,
             mlp_ratio,
             mask_ratio,
+            use_gradient_checkpointing,
         )
 
         self.decoder = DecoderVit(
@@ -605,6 +618,7 @@ class MaskedAutoencoderViT(nn.Module):
             decoder_depth,
             decoder_num_heads,
             mlp_ratio,
+            use_gradient_checkpointing,
         )
 
     def patchify(self, imgs):

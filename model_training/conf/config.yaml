@@ -24,6 +24,7 @@ hparams:
   batch_size: 2
   lr: 0.0001
   valid_interval: 5
+  use_gradient_checkpointing: true
 
 general:
   working_dir: working_env

@@ -71,7 +71,13 @@ def print_overridden_parameters() -> str:
 def get_model(cfg) -> nn.Module:
     """ Create the model to train. """
 
-    model = instantiate(cfg.model.model)
+    # Pass gradient checkpointing parameter from hparams to model
+    model_config = cfg.model.model
+    if hasattr(cfg.hparams, 'use_gradient_checkpointing'):
+        model_config = dict(model_config)
+        model_config['use_gradient_checkpointing'] = cfg.hparams.use_gradient_checkpointing
+    
+    model = instantiate(model_config)
     logger.info(f'\t {get_instance_repr(cfg.model.model)}')
     if cfg.general.use_pretrained:
         model_file = Path(cfg.general.pretrained_path)

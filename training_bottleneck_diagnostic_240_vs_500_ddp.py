@@ -29,6 +29,7 @@ import pynvml
 from datetime import datetime, timedelta
 import json
 import hydra
+from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from typing import Dict, List, Optional, Tuple
 import multiprocessing as mp_native
@@ -130,14 +131,22 @@ class DDPBottleneckDiagnostic:
             if rank == 0:
                 print(f"\n=== TESTING {spatial_size}x{spatial_size} - {model_name.upper()} with {world_size} GPUs ===")
                 print(f"Model config: {cfg.model.name}")
-                print(f"Dataset path: {cfg.general.dataset_path}")
-                print(f"Image size: {cfg.dataset.spatial_size}")
-                print(f"Spatial patch size: {cfg.model.patch_size_spatial}")
-                print(f"Wavelength patches: {cfg.model.patch_size_spectral}")
+                print(f"Dataset path: {cfg.dataset.csv_path}")
+                print(f"Image size: {spatial_size}")
+                print(f"Spatial patch size: {cfg.model.model.spatial_patch_size}")
+                print(f"Wavelength patch size: {cfg.model.model.wavelength_patch_size}")
             
             # Create dataset (each process loads full dataset)
-            dataset, preprocess_hsi = get_dataset(cfg, return_preprocessor=True)
-            train_dataset = dataset[0]
+            dataset_fn = instantiate(cfg.dataset)
+            datasets = dataset_fn(transform=None)
+            train_dataset = datasets[0]
+            
+            # Create preprocessor
+            def preprocess_hsi(x):
+                # Apply log transform and normalization
+                x = torch.log1p(x)
+                x = (x - x.mean(dim=(2,3), keepdim=True)) / (x.std(dim=(2,3), keepdim=True) + 1e-8)
+                return x
             
             # Create distributed sampler (ensures each GPU gets different data)
             sampler = DistributedSampler(
@@ -176,22 +185,8 @@ class DDPBottleneckDiagnostic:
                     temp_cfg = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
                     temp_cfg.dataloader.train.batch_size = batch_size
                     
-                    # Create model
-                    model = MaskedAutoencoderViT(
-                        img_size=temp_cfg.dataset.spatial_size,
-                        patch_size_spatial=temp_cfg.model.patch_size_spatial,
-                        patch_size_spectral=temp_cfg.model.patch_size_spectral,
-                        in_chans=temp_cfg.dataset.num_wavelengths,
-                        embed_dim=temp_cfg.model.embed_dim,
-                        depth=temp_cfg.model.depth,
-                        num_heads=temp_cfg.model.num_heads,
-                        decoder_embed_dim=temp_cfg.model.decoder_embed_dim,
-                        decoder_depth=temp_cfg.model.decoder_depth,
-                        decoder_num_heads=temp_cfg.model.decoder_num_heads,
-                        mlp_ratio=temp_cfg.model.mlp_ratio,
-                        norm_layer=nn.LayerNorm,
-                        norm_pix_loss=temp_cfg.model.norm_pix_loss,
-                    ).to(device)
+                    # Create model using instantiate (handles the model.model structure)
+                    model = instantiate(temp_cfg.model.model).to(device)
                     
                     # Wrap with DDP
                     model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
@@ -331,8 +326,9 @@ class DDPBottleneckDiagnostic:
             test_cfg.dataloader.train.num_workers = num_workers
             
             # Create dataset
-            dataset, _ = get_dataset(test_cfg, return_preprocessor=False)
-            train_dataset = dataset[0]
+            dataset_fn = instantiate(test_cfg.dataset)
+            datasets = dataset_fn(transform=None)
+            train_dataset = datasets[0]
             
             # Create distributed sampler
             sampler = DistributedSampler(
@@ -355,22 +351,8 @@ class DDPBottleneckDiagnostic:
                 timeout=60 if num_workers > 0 else 0
             )
             
-            # Create model
-            model = MaskedAutoencoderViT(
-                img_size=test_cfg.dataset.spatial_size,
-                patch_size_spatial=test_cfg.model.patch_size_spatial,
-                patch_size_spectral=test_cfg.model.patch_size_spectral,
-                in_chans=test_cfg.dataset.num_wavelengths,
-                embed_dim=test_cfg.model.embed_dim,
-                depth=test_cfg.model.depth,
-                num_heads=test_cfg.model.num_heads,
-                decoder_embed_dim=test_cfg.model.decoder_embed_dim,
-                decoder_depth=test_cfg.model.decoder_depth,
-                decoder_num_heads=test_cfg.model.decoder_num_heads,
-                mlp_ratio=test_cfg.model.mlp_ratio,
-                norm_layer=nn.LayerNorm,
-                norm_pix_loss=test_cfg.model.norm_pix_loss,
-            ).to(device)
+            # Create model using instantiate (handles the model.model structure)
+            model = instantiate(test_cfg.model.model).to(device)
             
             # Wrap with DDP
             model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
@@ -501,18 +483,19 @@ class DDPBottleneckDiagnostic:
         
         self.log_both("=== COMPREHENSIVE 240x240 vs 500x500 DDP COMPARISON ===")
         self.log_both(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        self.log_both(f"Data path: {self.base_cfg.general.dataset_path}")
+        self.log_both(f"Data path: {self.base_cfg.dataset.csv_path}")
         self.log_both(f"Base configuration: {self.base_cfg.dataloader.train.batch_size} batch, "
                      f"{self.base_cfg.dataloader.train.num_workers} workers")
         self.log_both(f"Available GPUs: {torch.cuda.device_count()}\n")
         
         # Test configurations
+        base_path = Path(self.base_cfg.dataset.csv_path).parent.parent
         configs_to_test = [
             # (spatial_size, model_name, dataset_path)
-            (240, 'mae_small_240', str(Path(self.base_cfg.general.dataset_path).parent / 'data_240' / 'data_all.csv')),
-            (240, 'mae_medium_240', str(Path(self.base_cfg.general.dataset_path).parent / 'data_240' / 'data_all.csv')),
-            (500, 'mae_small', self.base_cfg.general.dataset_path),
-            (500, 'mae_medium', self.base_cfg.general.dataset_path),
+            (240, 'mae_small_240', str(base_path / 'data_240' / 'data_all.csv')),
+            (240, 'mae_medium_240', str(base_path / 'data_240' / 'data_all.csv')),
+            (500, 'mae_small', str(base_path / 'data_500' / 'data_all.csv')),
+            (500, 'mae_medium', str(base_path / 'data_500' / 'data_all.csv')),
         ]
         
         # Test with different numbers of GPUs
@@ -528,14 +511,15 @@ class DDPBottleneckDiagnostic:
                 # Update config for this test
                 test_cfg = OmegaConf.create(OmegaConf.to_container(self.base_cfg, resolve=True))
                 test_cfg.model.name = model_name
-                test_cfg.dataset.spatial_size = spatial_size
-                test_cfg.general.dataset_path = dataset_path
+                test_cfg.dataset.csv_path = dataset_path
                 
                 # Adjust patch sizes based on spatial size
                 if spatial_size == 240:
-                    test_cfg.model.patch_size_spatial = 12
+                    test_cfg.model.model.spatial_patch_size = 12
+                    test_cfg.model.model.img_size = 240
                 else:
-                    test_cfg.model.patch_size_spatial = 25
+                    test_cfg.model.model.spatial_patch_size = 25
+                    test_cfg.model.model.img_size = 500
                 
                 # Use multiprocessing queue for results
                 result_queue = mp.Queue()

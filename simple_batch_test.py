@@ -20,7 +20,13 @@ test_configs = [
     ("mae_medium", 1, [1, 2, 4], "combined_dataset"),
 ]
 
-def run_single_test(model_name, workers, batch_size, gpu_count, dataset_config):
+# Gradient checkpointing variants to test
+checkpoint_configs = [
+    (False, "NoChk"),
+    (True, "WithChk")
+]
+
+def run_single_test(model_name, workers, batch_size, gpu_count, dataset_config, use_checkpointing=False):
     """Run a single configuration test in a separate process"""
     
     # Create a simple test script
@@ -44,7 +50,7 @@ from omegaconf import OmegaConf
 import hydra
 from hydra import initialize, compose
 
-def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_config):
+def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_config, use_checkpointing):
     # Setup DDP
     from torch.distributed import TCPStore
     from datetime import timedelta
@@ -80,6 +86,7 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
         cfg.dataset.trial_mode = False
         cfg.hparams.batch_size = batch_size
         cfg.dataloader.num_workers = workers
+        cfg.hparams.use_gradient_checkpointing = use_checkpointing
         
         # Override dataset if needed
         try:
@@ -185,12 +192,14 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
             samples_per_sec = batch_size / (avg_forward_time/1000 + avg_backward_time/1000)
             total_throughput = samples_per_sec * world_size
             
-            result_line = f"{{model_name}}_{{world_size}}GPU_w{{workers}}_b{{batch_size}}: Data={{data_rate:.1f}}/s, Forward={{avg_forward_time:.1f}}ms, Backward={{avg_backward_time:.1f}}ms, Training={{samples_per_sec:.1f}}/s, Total={{total_throughput:.1f}}/s"
+            chk_status = "WithChk" if use_checkpointing else "NoChk"
+            result_line = f"{{model_name}}_{{world_size}}GPU_w{{workers}}_b{{batch_size}}_{{chk_status}}: Data={{data_rate:.1f}}/s, Forward={{avg_forward_time:.1f}}ms, Backward={{avg_backward_time:.1f}}ms, Training={{samples_per_sec:.1f}}/s, Total={{total_throughput:.1f}}/s"
             print(result_line)
                   
     except Exception as e:
         if rank == 0:
-            print(f"{{model_name}}_{{world_size}}GPU_w{{workers}}_b{{batch_size}}: ERROR - {{str(e)}}")
+            chk_status = "WithChk" if use_checkpointing else "NoChk"
+            print(f"{{model_name}}_{{world_size}}GPU_w{{workers}}_b{{batch_size}}_{{chk_status}}: ERROR - {{str(e)}}")
     
     finally:
         # Aggressive cleanup before process ends
@@ -220,11 +229,12 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
             dist.destroy_process_group()
 
 if __name__ == "__main__":
-    mp.spawn(single_gpu_test, args=({gpu_count}, "{model_name}", {batch_size}, {workers}, "{dataset_config}"), nprocs={gpu_count}, join=True)
+    mp.spawn(single_gpu_test, args=({gpu_count}, "{model_name}", {batch_size}, {workers}, "{dataset_config}", {use_checkpointing}), nprocs={gpu_count}, join=True)
 """
 
     # Write test script to temporary file
-    script_path = f"temp_test_{model_name}_{gpu_count}gpu_w{workers}_b{batch_size}.py"
+    chk_suffix = "chk" if use_checkpointing else "nochk"
+    script_path = f"temp_test_{model_name}_{gpu_count}gpu_w{workers}_b{batch_size}_{chk_suffix}.py"
     with open(script_path, 'w') as f:
         f.write(test_script)
     
@@ -250,11 +260,13 @@ if __name__ == "__main__":
             return f"ERROR: {error_msg}"
             
     except subprocess.TimeoutExpired:
-        timeout_msg = f"{model_name}_{gpu_count}GPU_w{workers}_b{batch_size}: TIMEOUT"
+        chk_status = "WithChk" if use_checkpointing else "NoChk"
+        timeout_msg = f"{model_name}_{gpu_count}GPU_w{workers}_b{batch_size}_{chk_status}: TIMEOUT"
         print(timeout_msg)
         return timeout_msg
     except Exception as e:
-        error_msg = f"{model_name}_{gpu_count}GPU_w{workers}_b{batch_size}: ERROR - {str(e)}"
+        chk_status = "WithChk" if use_checkpointing else "NoChk"
+        error_msg = f"{model_name}_{gpu_count}GPU_w{workers}_b{batch_size}_{chk_status}: ERROR - {str(e)}"
         print(error_msg)
         return error_msg
     finally:
@@ -287,59 +299,62 @@ def main():
     # CSV header for structured data
     csv_file = results_dir / f"batch_optimization_{timestamp}.csv"
     with open(csv_file, 'w') as f:
-        f.write("Model,Resolution,GPUs,Workers,BatchSize,DataRate,ForwardTime,BackwardTime,TrainingRate,TotalThroughput,EpochTime,SamplesPerHour,Status\\n")
+        f.write("Model,Resolution,GPUs,Workers,BatchSize,GradCheckpoint,DataRate,ForwardTime,BackwardTime,TrainingRate,TotalThroughput,EpochTime,SamplesPerHour,Status\\n")
     
     # Test different GPU counts
     for gpu_count in [1, 2, 3]:
         log_both(f"\\n=== TESTING WITH {gpu_count} GPU(s) ===")
         
-        for model_name, workers, batch_sizes, dataset_config in test_configs:
-            # Determine resolution from model/dataset
-            resolution = "240x240" if "240" in model_name or "240" in dataset_config else "500x500"
+        for use_checkpointing, chk_desc in checkpoint_configs:
+            log_both(f"\\n--- Testing {chk_desc} (Gradient Checkpointing: {'ON' if use_checkpointing else 'OFF'}) ---")
             
-            log_both(f"\\nTesting {model_name} ({resolution}) with {gpu_count} GPU(s)")
-            
-            # Track if we hit memory limit
-            hit_memory_limit = False
-            
-            for batch_size in batch_sizes:
-                # Skip larger batch sizes if we already hit memory limit
-                if hit_memory_limit:
-                    log_both(f"  Skipping batch {batch_size} - previous OOM")
-                    with open(csv_file, 'a') as f:
-                        f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},"
-                               f"0,0,0,0,0,N/A,0,SKIPPED_OOM\n")
-                        f.flush()
-                    continue
+            for model_name, workers, batch_sizes, dataset_config in test_configs:
+                # Determine resolution from model/dataset
+                resolution = "240x240" if "240" in model_name or "240" in dataset_config else "500x500"
                 
-                result = run_single_test(model_name, workers, batch_size, gpu_count, dataset_config)
+                log_both(f"\\nTesting {model_name} ({resolution}) with {gpu_count} GPU(s) - {chk_desc}")
                 
-                # Force GPU memory cleanup between tests
-                import torch
-                if torch.cuda.is_available():
-                    # Check memory before cleanup
-                    allocated_before = torch.cuda.memory_allocated(0) / 1e9
-                    reserved_before = torch.cuda.memory_reserved(0) / 1e9
-                    
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
-                    
-                    # Check memory after cleanup
-                    allocated_after = torch.cuda.memory_allocated(0) / 1e9
-                    reserved_after = torch.cuda.memory_reserved(0) / 1e9
-                    
-                    log_both(f"    GPU Memory: Before cleanup: {allocated_before:.2f}GB allocated, {reserved_before:.2f}GB reserved")
-                    log_both(f"    GPU Memory: After cleanup:  {allocated_after:.2f}GB allocated, {reserved_after:.2f}GB reserved")
+                # Track if we hit memory limit
+                hit_memory_limit = False
                 
-                # Longer delay to ensure cleanup
-                time.sleep(5)
-                
-                # Log result immediately
-                log_both(f"    {batch_size}: {result if result else 'No output'}")
-                
-                # Parse result and save to CSV
-                if result and "ERROR" not in result and "TIMEOUT" not in result:
-                    try:
+                    for batch_size in batch_sizes:
+                        # Skip larger batch sizes if we already hit memory limit
+                        if hit_memory_limit:
+                            log_both(f"  Skipping batch {batch_size} - previous OOM")
+                            with open(csv_file, 'a') as f:
+                                f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},{chk_desc},"
+                                       f"0,0,0,0,0,N/A,0,SKIPPED_OOM\n")
+                                f.flush()
+                            continue
+                        
+                        result = run_single_test(model_name, workers, batch_size, gpu_count, dataset_config, use_checkpointing)
+                        
+                        # Force GPU memory cleanup between tests
+                        import torch
+                        if torch.cuda.is_available():
+                            # Check memory before cleanup
+                            allocated_before = torch.cuda.memory_allocated(0) / 1e9
+                            reserved_before = torch.cuda.memory_reserved(0) / 1e9
+                            
+                            torch.cuda.empty_cache()
+                            torch.cuda.synchronize()
+                            
+                            # Check memory after cleanup
+                            allocated_after = torch.cuda.memory_allocated(0) / 1e9
+                            reserved_after = torch.cuda.memory_reserved(0) / 1e9
+                            
+                            log_both(f"    GPU Memory: Before cleanup: {allocated_before:.2f}GB allocated, {reserved_before:.2f}GB reserved")
+                            log_both(f"    GPU Memory: After cleanup:  {allocated_after:.2f}GB allocated, {reserved_after:.2f}GB reserved")
+                        
+                        # Longer delay to ensure cleanup
+                        time.sleep(5)
+                        
+                        # Log result immediately
+                        log_both(f"    {batch_size}: {result if result else 'No output'}")
+                        
+                        # Parse result and save to CSV
+                        if result and "ERROR" not in result and "TIMEOUT" not in result:
+                            try:
                         # Simple parsing - look for numbers after = signs
                         data_rate = 0
                         forward_time = 0
@@ -390,34 +405,34 @@ def main():
                             epoch_time = "N/A"
                             samples_per_hour = 0
                         
-                        # Write to CSV
-                        with open(csv_file, 'a') as f:
-                            f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},"
-                                   f"{data_rate},{forward_time},{backward_time},"
-                                   f"{training_rate},{total_throughput},{epoch_time},{samples_per_hour:.0f},SUCCESS\n")
-                            f.flush()
-                    except Exception as parse_error:
-                        log_both(f"      Parse error: {parse_error}, result was: {result}")
-                        with open(csv_file, 'a') as f:
-                            f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},"
-                                   f"0,0,0,0,0,N/A,0,PARSE_ERROR\n")
-                            f.flush()
-                else:
-                    # Mark failed tests
-                    status = "ERROR" if result and "ERROR" in result else "TIMEOUT"
-                    
-                    # Check if it's a memory error
-                    if result and "CUDA out of memory" in result:
-                        status = "OOM"
-                        hit_memory_limit = True
-                        log_both(f"  Memory limit reached at batch {batch_size}")
-                    
-                    with open(csv_file, 'a') as f:
-                        f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},"
-                               f"0,0,0,0,0,N/A,0,{status}\n")
-                        f.flush()
-                
-                time.sleep(2)  # Brief pause between tests
+                                # Write to CSV
+                                with open(csv_file, 'a') as f:
+                                    f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},{chk_desc},"
+                                           f"{data_rate},{forward_time},{backward_time},"
+                                           f"{training_rate},{total_throughput},{epoch_time},{samples_per_hour:.0f},SUCCESS\n")
+                                    f.flush()
+                            except Exception as parse_error:
+                                log_both(f"      Parse error: {parse_error}, result was: {result}")
+                                with open(csv_file, 'a') as f:
+                                    f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},{chk_desc},"
+                                           f"0,0,0,0,0,N/A,0,PARSE_ERROR\n")
+                                    f.flush()
+                        else:
+                            # Mark failed tests
+                            status = "ERROR" if result and "ERROR" in result else "TIMEOUT"
+                            
+                            # Check if it's a memory error
+                            if result and "CUDA out of memory" in result:
+                                status = "OOM"
+                                hit_memory_limit = True
+                                log_both(f"  Memory limit reached at batch {batch_size}")
+                            
+                            with open(csv_file, 'a') as f:
+                                f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},{chk_desc},"
+                                       f"0,0,0,0,0,N/A,0,{status}\n")
+                                f.flush()
+                        
+                        time.sleep(2)  # Brief pause between tests
     
     log_both("\\n=== TEST COMPLETED ===")
     log_both(f"Results saved to:")

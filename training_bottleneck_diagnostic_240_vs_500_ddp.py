@@ -59,6 +59,7 @@ class DDPBottleneckDiagnostic:
         # Initialize GPU monitoring
         pynvml.nvmlInit()
         self.results = {}
+        self.all_results = {}  # Track results across all tests
         self.text_file = None
         
     def log_both(self, message: str, rank: int = 0):
@@ -238,6 +239,9 @@ class DDPBottleneckDiagnostic:
             worker_configs = [1, 2, 4]
             batch_configs = test_batches[:test_batches.index(max_batch)+1]
             
+            best_config = None
+            best_throughput = 0
+            
             for num_workers in worker_configs:
                 for batch_size in batch_configs:
                     config_name = f"w{num_workers}_b{batch_size}"
@@ -272,12 +276,33 @@ class DDPBottleneckDiagnostic:
                               f"{avg_metrics['samples_per_sec']:<12.1f} "
                               f"{total_throughput:<12.1f} "
                               f"{avg_metrics['epoch_time']:<14}")
+                        
+                        # Track best configuration
+                        if total_throughput > best_throughput:
+                            best_throughput = total_throughput
+                            best_config = {
+                                'workers': num_workers,
+                                'batch_size': batch_size,
+                                'total_throughput': total_throughput,
+                                'config': config_name,
+                                'data_rate': avg_metrics['data_rate'],
+                                'gpu_util': avg_metrics['gpu_util']
+                            }
                     else:
                         # Send metrics to rank 0
                         dist.send(metrics, dst=0)
                     
                     # Synchronize before next test
                     dist.barrier()
+            
+            # Report best configuration
+            if rank == 0 and best_config:
+                print(f"\nBest configuration: {best_config['config']} "
+                      f"({best_config['total_throughput']:.1f} samples/s)")
+                
+                # Store results if queue is available
+                if hasattr(cfg, '_result_queue'):
+                    cfg._result_queue.put(best_config)
             
             # Clean up
             self.cleanup_ddp()
@@ -322,6 +347,11 @@ class DDPBottleneckDiagnostic:
         try:
             # Update config
             test_cfg = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
+            
+            # Ensure we're using full dataset
+            test_cfg.dataset.trial_mode = False
+            
+            # Update test parameters
             test_cfg.dataloader.train.batch_size = batch_size
             test_cfg.dataloader.train.num_workers = num_workers
             
@@ -507,11 +537,30 @@ class DDPBottleneckDiagnostic:
             self.log_both(f"TESTING WITH {num_gpus} GPU{'s' if num_gpus > 1 else ''}")
             self.log_both(f"{'='*80}\n")
             
+            # Track best configurations for this GPU count
+            best_configs_by_gpu = {}
+            
             for spatial_size, model_name, dataset_path in configs_to_test:
                 # Update config for this test
                 test_cfg = OmegaConf.create(OmegaConf.to_container(self.base_cfg, resolve=True))
                 test_cfg.model.name = model_name
                 test_cfg.dataset.csv_path = dataset_path
+                
+                # CRITICAL: Disable trial mode for realistic performance testing
+                test_cfg.dataset.trial_mode = False
+                test_cfg.dataset.trial_size = 1000  # Not used when trial_mode=False
+                
+                # Use proper dataloader settings from training
+                test_cfg.dataloader = OmegaConf.create({
+                    'train': {
+                        'batch_size': 2,  # Will be overridden in testing loop
+                        'num_workers': 2,  # Will be overridden in testing loop
+                        'pin_memory': False,  # Disabled for DDP
+                        'prefetch_factor': 4,
+                        'persistent_workers': True,
+                        'shuffle': False  # Handled by DistributedSampler
+                    }
+                })
                 
                 # Adjust patch sizes based on spatial size
                 if spatial_size == 240:
@@ -523,6 +572,10 @@ class DDPBottleneckDiagnostic:
                 
                 # Use multiprocessing queue for results
                 result_queue = mp.Queue()
+                config_results_queue = mp.Queue()
+                
+                # Store results for analysis
+                test_cfg._result_queue = config_results_queue
                 
                 # Spawn processes
                 mp.spawn(
@@ -537,39 +590,103 @@ class DDPBottleneckDiagnostic:
                     result = result_queue.get(timeout=300)
                     if result != "DONE":
                         self.log_both(f"Error testing {model_name}: {result}")
+                    else:
+                        # Collect performance results if available
+                        try:
+                            while not config_results_queue.empty():
+                                perf_result = config_results_queue.get_nowait()
+                                key = f"{model_name}_{spatial_size}"
+                                if key not in best_configs_by_gpu:
+                                    best_configs_by_gpu[key] = perf_result
+                                elif perf_result['total_throughput'] > best_configs_by_gpu[key]['total_throughput']:
+                                    best_configs_by_gpu[key] = perf_result
+                                
+                                # Store for global summary
+                                if key not in self.all_results:
+                                    self.all_results[key] = {}
+                                self.all_results[key][num_gpus] = {
+                                    'throughput': perf_result['total_throughput'],
+                                    'workers': perf_result['workers'],
+                                    'batch': perf_result['batch_size'],
+                                    'gpu_util': perf_result['gpu_util']
+                                }
+                        except:
+                            pass
                 except:
                     self.log_both(f"Timeout testing {model_name} with {num_gpus} GPUs")
                 
                 # Add some spacing between tests
                 self.log_both("")
+            
+            # Print optimal configurations for this GPU count
+            self.log_both(f"\n=== OPTIMAL CONFIGURATIONS FOR {num_gpus} GPU{'s' if num_gpus > 1 else ''} ===")
+            for config_key, perf_data in best_configs_by_gpu.items():
+                if 'config' in perf_data:
+                    self.log_both(f"{config_key}: Workers={perf_data['workers']}, "
+                                 f"Batch={perf_data['batch_size']}, "
+                                 f"Throughput={perf_data['total_throughput']:.1f} samples/s")
         
         # Summary analysis
         self.log_both(f"\n{'='*80}")
         self.log_both("SUMMARY ANALYSIS")
         self.log_both(f"{'='*80}")
-        self.log_both("\nKey metrics to analyze:")
-        self.log_both("1. Data Load Rate: Should remain constant if no I/O bottleneck")
-        self.log_both("   - If it decreases with more GPUs → F: drive bottleneck confirmed")
-        self.log_both("2. GPU Utilization: Should stay high (>80%) if well-fed with data")
-        self.log_both("   - If it drops with more GPUs → I/O starvation")
-        self.log_both("3. Training Speed Scaling:")
-        self.log_both("   - 1 GPU: baseline")
-        self.log_both("   - 2 GPUs: should be ~2x faster if no bottleneck")
-        self.log_both("   - 3 GPUs: should be ~3x faster if no bottleneck")
-        self.log_both("4. Total Throughput (Total/s column):")
-        self.log_both("   - Shows combined samples/sec across all GPUs")
-        self.log_both("   - If this plateaus, you've hit the I/O limit")
+        
+        # Print optimization summary table
+        self.log_both("\n=== OPTIMIZATION SUMMARY TABLE ===")
+        self.log_both("\nBest configurations by model and GPU count:")
+        self.log_both("-" * 100)
+        self.log_both(f"{'Model':<20} {'GPUs':<6} {'Workers':<8} {'Batch':<7} {'Throughput':<12} {'GPU Util':<10} {'Scaling':<10}")
+        self.log_both("-" * 100)
+        
+        # Analyze and display results if we have any
+        if hasattr(self, 'all_results') and self.all_results:
+            for model_key in sorted(self.all_results.keys()):
+                baseline_throughput = self.all_results[model_key].get(1, {}).get('throughput', 1)
+                for gpu_count in sorted(self.all_results[model_key].keys()):
+                    config = self.all_results[model_key][gpu_count]
+                    scaling = config['throughput'] / baseline_throughput if baseline_throughput > 0 else 0
+                    self.log_both(f"{model_key:<20} {gpu_count:<6} {config['workers']:<8} "
+                                 f"{config['batch']:<7} {config['throughput']:<12.1f} "
+                                 f"{config['gpu_util']:<10.1f} {scaling:<10.2f}x")
+        else:
+            self.log_both("No performance data collected for summary table.")
+            self.log_both("Check individual test results above for optimal configurations.")
+        
+        self.log_both("\nKey findings:")
+        self.log_both("1. Data Load Rate: Check if it decreases with more GPUs (F: drive bottleneck)")
+        self.log_both("2. GPU Utilization: Should stay >80% if well-fed with data")
+        self.log_both("3. Scaling Efficiency:")
+        self.log_both("   - Linear scaling (2x, 3x) = No I/O bottleneck")
+        self.log_both("   - Sub-linear scaling = I/O or communication bottleneck")
+        self.log_both("4. Optimal Worker Count:")
+        self.log_both("   - Usually 1-2 workers per GPU is optimal with shared storage")
+        self.log_both("   - More workers may increase disk contention")
         
         self.log_both(f"\nCompleted at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         self.text_file.close()
         print(f"\nResults saved to: {output_file}")
 
 
-@hydra.main(version_base="1.3", config_path="model_training/conf", config_name="config")
+@hydra.main(version_base="1.3", config_path="model_training/conf", config_name="full_run_240")
 def main(cfg: DictConfig) -> None:
     """Run the comprehensive DDP diagnostic"""
-    # Force DDP mode
+    # Force DDP mode and proper device configuration
     cfg.general.use_ddp = True
+    cfg.general.parallel.use_parallel = True
+    cfg.general.parallel.device_ids = [0, 1, 2]  # Use all 3 GPUs
+    
+    # Disable trial mode for realistic benchmarking
+    cfg.dataset.trial_mode = False
+    
+    # Print configuration being used
+    print(f"Using configuration:")
+    print(f"- Model: {cfg.model.name}")
+    print(f"- Dataset: {cfg.dataset.csv_path}")
+    print(f"- DDP enabled: {cfg.general.use_ddp}")
+    print(f"- Trial mode: {cfg.dataset.trial_mode}")
+    print(f"- Base batch size: {cfg.hparams.batch_size}")
+    print(f"- Base workers: {cfg.dataloader.num_workers}")
+    print("-" * 50)
     
     # Create diagnostic instance
     diagnostic = DDPBottleneckDiagnostic(cfg)

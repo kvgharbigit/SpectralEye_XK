@@ -317,120 +317,120 @@ def main():
                 # Track if we hit memory limit
                 hit_memory_limit = False
                 
-                    for batch_size in batch_sizes:
-                        # Skip larger batch sizes if we already hit memory limit
-                        if hit_memory_limit:
-                            log_both(f"  Skipping batch {batch_size} - previous OOM")
-                            with open(csv_file, 'a') as f:
-                                f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},{chk_desc},"
-                                       f"0,0,0,0,0,N/A,0,SKIPPED_OOM\n")
-                                f.flush()
-                            continue
+                for batch_size in batch_sizes:
+                    # Skip larger batch sizes if we already hit memory limit
+                    if hit_memory_limit:
+                        log_both(f"  Skipping batch {batch_size} - previous OOM")
+                        with open(csv_file, 'a') as f:
+                            f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},{chk_desc},"
+                                   f"0,0,0,0,0,N/A,0,SKIPPED_OOM\n")
+                            f.flush()
+                        continue
+                    
+                    result = run_single_test(model_name, workers, batch_size, gpu_count, dataset_config, use_checkpointing)
+                    
+                    # Force GPU memory cleanup between tests
+                    import torch
+                    if torch.cuda.is_available():
+                        # Check memory before cleanup
+                        allocated_before = torch.cuda.memory_allocated(0) / 1e9
+                        reserved_before = torch.cuda.memory_reserved(0) / 1e9
                         
-                        result = run_single_test(model_name, workers, batch_size, gpu_count, dataset_config, use_checkpointing)
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
                         
-                        # Force GPU memory cleanup between tests
-                        import torch
-                        if torch.cuda.is_available():
-                            # Check memory before cleanup
-                            allocated_before = torch.cuda.memory_allocated(0) / 1e9
-                            reserved_before = torch.cuda.memory_reserved(0) / 1e9
+                        # Check memory after cleanup
+                        allocated_after = torch.cuda.memory_allocated(0) / 1e9
+                        reserved_after = torch.cuda.memory_reserved(0) / 1e9
+                        
+                        log_both(f"    GPU Memory: Before cleanup: {allocated_before:.2f}GB allocated, {reserved_before:.2f}GB reserved")
+                        log_both(f"    GPU Memory: After cleanup:  {allocated_after:.2f}GB allocated, {reserved_after:.2f}GB reserved")
+                    
+                    # Longer delay to ensure cleanup
+                    time.sleep(5)
+                    
+                    # Log result immediately
+                    log_both(f"    {batch_size}: {result if result else 'No output'}")
+                    
+                    # Parse result and save to CSV
+                    if result and "ERROR" not in result and "TIMEOUT" not in result:
+                        try:
+                            # Simple parsing - look for numbers after = signs
+                            data_rate = 0
+                            forward_time = 0
+                            backward_time = 0
+                            training_rate = 0
+                            total_throughput = 0
                             
-                            torch.cuda.empty_cache()
-                            torch.cuda.synchronize()
+                            # Extract Data rate
+                            if "Data=" in result:
+                                data_part = result.split("Data=")[1].split("/s")[0]
+                                data_rate = float(data_part)
+                        
+                            # Extract Forward time
+                            if "Forward=" in result:
+                                forward_part = result.split("Forward=")[1].split("ms")[0]
+                                forward_time = float(forward_part)
                             
-                            # Check memory after cleanup
-                            allocated_after = torch.cuda.memory_allocated(0) / 1e9
-                            reserved_after = torch.cuda.memory_reserved(0) / 1e9
+                            # Extract Backward time
+                            if "Backward=" in result:
+                                backward_part = result.split("Backward=")[1].split("ms")[0]
+                                backward_time = float(backward_part)
                             
-                            log_both(f"    GPU Memory: Before cleanup: {allocated_before:.2f}GB allocated, {reserved_before:.2f}GB reserved")
-                            log_both(f"    GPU Memory: After cleanup:  {allocated_after:.2f}GB allocated, {reserved_after:.2f}GB reserved")
-                        
-                        # Longer delay to ensure cleanup
-                        time.sleep(5)
-                        
-                        # Log result immediately
-                        log_both(f"    {batch_size}: {result if result else 'No output'}")
-                        
-                        # Parse result and save to CSV
-                        if result and "ERROR" not in result and "TIMEOUT" not in result:
-                            try:
-                        # Simple parsing - look for numbers after = signs
-                        data_rate = 0
-                        forward_time = 0
-                        backward_time = 0
-                        training_rate = 0
-                        total_throughput = 0
-                        
-                        # Extract Data rate
-                        if "Data=" in result:
-                            data_part = result.split("Data=")[1].split("/s")[0]
-                            data_rate = float(data_part)
-                        
-                        # Extract Forward time
-                        if "Forward=" in result:
-                            forward_part = result.split("Forward=")[1].split("ms")[0]
-                            forward_time = float(forward_part)
-                        
-                        # Extract Backward time
-                        if "Backward=" in result:
-                            backward_part = result.split("Backward=")[1].split("ms")[0]
-                            backward_time = float(backward_part)
-                        
-                        # Extract Training rate
-                        if "Training=" in result:
-                            training_part = result.split("Training=")[1].split("/s")[0]
-                            training_rate = float(training_part)
-                        
-                        # Extract Total throughput
-                        if "Total=" in result:
-                            total_part = result.split("Total=")[1].split("/s")[0]
-                            total_throughput = float(total_part)
-                        
-                        # Calculate training speed estimates
-                        if "240" in resolution:
-                            dataset_size = 49000
-                        else:
-                            dataset_size = 34000
-                        
-                        if total_throughput > 0:
-                            epoch_seconds = dataset_size / total_throughput
-                            epoch_minutes = epoch_seconds / 60
-                            if epoch_minutes < 60:
-                                epoch_time = f"{epoch_minutes:.1f}min"
+                            # Extract Training rate
+                            if "Training=" in result:
+                                training_part = result.split("Training=")[1].split("/s")[0]
+                                training_rate = float(training_part)
+                            
+                            # Extract Total throughput
+                            if "Total=" in result:
+                                total_part = result.split("Total=")[1].split("/s")[0]
+                                total_throughput = float(total_part)
+                            
+                            # Calculate training speed estimates
+                            if "240" in resolution:
+                                dataset_size = 49000
                             else:
-                                epoch_time = f"{epoch_minutes/60:.1f}hr"
-                            samples_per_hour = total_throughput * 3600
-                        else:
-                            epoch_time = "N/A"
-                            samples_per_hour = 0
-                        
-                                # Write to CSV
-                                with open(csv_file, 'a') as f:
-                                    f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},{chk_desc},"
-                                           f"{data_rate},{forward_time},{backward_time},"
-                                           f"{training_rate},{total_throughput},{epoch_time},{samples_per_hour:.0f},SUCCESS\n")
-                                    f.flush()
-                            except Exception as parse_error:
-                                log_both(f"      Parse error: {parse_error}, result was: {result}")
-                                with open(csv_file, 'a') as f:
-                                    f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},{chk_desc},"
-                                           f"0,0,0,0,0,N/A,0,PARSE_ERROR\n")
-                                    f.flush()
-                        else:
-                            # Mark failed tests
-                            status = "ERROR" if result and "ERROR" in result else "TIMEOUT"
+                                dataset_size = 34000
                             
-                            # Check if it's a memory error
-                            if result and "CUDA out of memory" in result:
-                                status = "OOM"
-                                hit_memory_limit = True
-                                log_both(f"  Memory limit reached at batch {batch_size}")
+                            if total_throughput > 0:
+                                epoch_seconds = dataset_size / total_throughput
+                                epoch_minutes = epoch_seconds / 60
+                                if epoch_minutes < 60:
+                                    epoch_time = f"{epoch_minutes:.1f}min"
+                                else:
+                                    epoch_time = f"{epoch_minutes/60:.1f}hr"
+                                samples_per_hour = total_throughput * 3600
+                            else:
+                                epoch_time = "N/A"
+                                samples_per_hour = 0
                             
+                            # Write to CSV
                             with open(csv_file, 'a') as f:
                                 f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},{chk_desc},"
-                                       f"0,0,0,0,0,N/A,0,{status}\n")
+                                       f"{data_rate},{forward_time},{backward_time},"
+                                       f"{training_rate},{total_throughput},{epoch_time},{samples_per_hour:.0f},SUCCESS\n")
                                 f.flush()
+                        except Exception as parse_error:
+                            log_both(f"      Parse error: {parse_error}, result was: {result}")
+                            with open(csv_file, 'a') as f:
+                                f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},{chk_desc},"
+                                       f"0,0,0,0,0,N/A,0,PARSE_ERROR\n")
+                                f.flush()
+                    else:
+                        # Mark failed tests
+                        status = "ERROR" if result and "ERROR" in result else "TIMEOUT"
+                        
+                        # Check if it's a memory error
+                        if result and "CUDA out of memory" in result:
+                            status = "OOM"
+                            hit_memory_limit = True
+                            log_both(f"  Memory limit reached at batch {batch_size}")
+                        
+                        with open(csv_file, 'a') as f:
+                            f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},{chk_desc},"
+                                   f"0,0,0,0,0,N/A,0,{status}\n")
+                            f.flush()
                         
                         time.sleep(2)  # Brief pause between tests
     

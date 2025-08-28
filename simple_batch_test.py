@@ -4,6 +4,10 @@ Simple batch size tester - runs each batch size in a separate Python process
 to avoid memory accumulation issues.
 """
 import os
+# Set OpenMP environment variables BEFORE importing any other modules
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+os.environ['OMP_NUM_THREADS'] = '1'
+
 import subprocess
 import sys
 from pathlib import Path

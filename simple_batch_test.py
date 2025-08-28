@@ -247,7 +247,8 @@ def main():
     def log_both(message):
         print(message)
         with open(results_file, 'a') as f:
-            f.write(message + '\\n')
+            f.write(message + '\n')
+            f.flush()  # Force write to disk
     
     log_both("=== BATCH SIZE OPTIMIZATION TEST ===")
     log_both(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -278,7 +279,8 @@ def main():
                     log_both(f"  Skipping batch {batch_size} - previous OOM")
                     with open(csv_file, 'a') as f:
                         f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},"
-                               f"0,0,0,0,0,N/A,0,SKIPPED_OOM\\n")
+                               f"0,0,0,0,0,N/A,0,SKIPPED_OOM\n")
+                        f.flush()
                     continue
                 
                 result = run_single_test(model_name, workers, batch_size, gpu_count, dataset_config)
@@ -343,12 +345,14 @@ def main():
                         with open(csv_file, 'a') as f:
                             f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},"
                                    f"{data_rate},{forward_time},{backward_time},"
-                                   f"{training_rate},{total_throughput},{epoch_time},{samples_per_hour:.0f},SUCCESS\\n")
+                                   f"{training_rate},{total_throughput},{epoch_time},{samples_per_hour:.0f},SUCCESS\n")
+                            f.flush()
                     except Exception as parse_error:
                         log_both(f"      Parse error: {parse_error}, result was: {result}")
                         with open(csv_file, 'a') as f:
                             f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},"
-                                   f"0,0,0,0,0,N/A,0,PARSE_ERROR\\n")
+                                   f"0,0,0,0,0,N/A,0,PARSE_ERROR\n")
+                            f.flush()
                 else:
                     # Mark failed tests
                     status = "ERROR" if result and "ERROR" in result else "TIMEOUT"
@@ -361,7 +365,8 @@ def main():
                     
                     with open(csv_file, 'a') as f:
                         f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},"
-                               f"0,0,0,0,0,N/A,0,{status}\\n")
+                               f"0,0,0,0,0,N/A,0,{status}\n")
+                        f.flush()
                 
                 time.sleep(2)  # Brief pause between tests
     

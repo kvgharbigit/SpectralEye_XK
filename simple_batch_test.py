@@ -281,6 +281,9 @@ def main():
                 
                 result = run_single_test(model_name, workers, batch_size, gpu_count, dataset_config)
                 
+                # Log result immediately
+                log_both(f"    {batch_size}: {result if result else 'No output'}")
+                
                 # Parse result and save to CSV
                 if result and "ERROR" not in result and "TIMEOUT" not in result:
                     try:

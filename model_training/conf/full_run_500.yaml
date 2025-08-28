@@ -2,7 +2,7 @@
 
 defaults:
   - /config
-  - override /model: mae_tiny
+  - override /model: mae_medium
   - override /dataset: combined_dataset
   - override /scheduler: cosine_annealing
 
@@ -26,6 +26,6 @@ general:
 
 # Standard data loading for 500x500
 dataloader:
-  num_workers: 2  # Moderate for larger files
+  num_workers: 4  # Moderate for larger files
   pin_memory: true
   prefetch_factor: 2

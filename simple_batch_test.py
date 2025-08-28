@@ -312,11 +312,22 @@ def main():
                 # Force GPU memory cleanup between tests
                 import torch
                 if torch.cuda.is_available():
+                    # Check memory before cleanup
+                    allocated_before = torch.cuda.memory_allocated(0) / 1e9
+                    reserved_before = torch.cuda.memory_reserved(0) / 1e9
+                    
                     torch.cuda.empty_cache()
                     torch.cuda.synchronize()
+                    
+                    # Check memory after cleanup
+                    allocated_after = torch.cuda.memory_allocated(0) / 1e9
+                    reserved_after = torch.cuda.memory_reserved(0) / 1e9
+                    
+                    log_both(f"    GPU Memory: Before cleanup: {allocated_before:.2f}GB allocated, {reserved_before:.2f}GB reserved")
+                    log_both(f"    GPU Memory: After cleanup:  {allocated_after:.2f}GB allocated, {reserved_after:.2f}GB reserved")
                 
-                # Small delay to ensure cleanup
-                time.sleep(3)
+                # Longer delay to ensure cleanup
+                time.sleep(5)
                 
                 # Log result immediately
                 log_both(f"    {batch_size}: {result if result else 'No output'}")

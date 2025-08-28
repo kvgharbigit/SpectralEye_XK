@@ -24,7 +24,8 @@ def run_single_test(model_name, workers, batch_size, gpu_count, dataset_config):
 import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 os.environ["TORCH_DISTRIBUTED_USE_LIBUV"] = "0"
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,max_split_size_mb:128"
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
 import torch
 import torch.distributed as dist

@@ -56,7 +56,8 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent / "model_training"))
 from model_training.utils.preprocess_hsi import preprocess_hsi
-from model_training.models.spectral_gpt.models_mae_spectral import MaskedAutoencoderViT
+# Import from spectral_gpt.py (the actual file used by training)
+from model_training.models.spectral_gpt.spectral_gpt import MaskedAutoencoderViT
 
 def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_config, use_checkpointing):
     # Setup DDP

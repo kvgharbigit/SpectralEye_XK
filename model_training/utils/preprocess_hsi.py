@@ -8,9 +8,12 @@ SP_STD_FILE = r'C:\Users\xhadoux\Data_projects\spectral_compression\src\data_pre
 
 
 def preprocess_hsi(hs):
-    # Force FP32 for numerical stability in preprocessing
+    # Force FP32 for numerical stability in preprocessing with memory optimization
     original_dtype = hs.dtype
-    hs = hs.float()  # Always use FP32 for preprocessing
+    needs_conversion = hs.dtype != torch.float32
+    
+    if needs_conversion:
+        hs = hs.float()  # Convert to FP32 for numerical stability
     
     nb_bands = hs.size(1)
     mask = hs[:, 0] < 1e-3
@@ -21,8 +24,14 @@ def preprocess_hsi(hs):
     hs = hs + 3
     hs = hs / 3
     
-    # Convert back to original dtype for memory efficiency
-    return hs.to(original_dtype)
+    # Convert back to original dtype with explicit cleanup
+    if needs_conversion:
+        hs = hs.to(original_dtype)
+        # Force garbage collection to free intermediate tensors
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    
+    return hs
 
 
 def preprocess_hsi_std_all(hs, sp_mean_file=SP_MEAN_FILE, sp_std_file=SP_STD_FILE):

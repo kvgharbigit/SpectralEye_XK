@@ -8,7 +8,7 @@ defaults:
 
 # Optimized hyperparameters for 500x500 full training (from diagnostic results)
 hparams:
-  batch_size: 6  # Optimal per-GPU batch size (w2_b6 was fastest: 48.1 samples/sec)
+  batch_size: 8  # Optimal per-GPU batch size (w2_b6 was fastest: 48.1 samples/sec)
   nb_epochs: 250
   lr: 0.0001
   valid_interval: 10  # Validation every 10 epochs for long training

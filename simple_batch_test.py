@@ -246,17 +246,17 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
                 reserved = torch.cuda.memory_reserved(device) / 1024**3
                 
                 chk_status = "WithChk" if use_checkpointing else "NoChk"
-                result_line = f"{{model_name}}_{{world_size}}GPU_w{{workers}}_b{{batch_size}}_{{chk_status}}: Data={{data_rate:.1f}}/s, Forward={{avg_forward_time:.1f}}ms, Backward={{avg_backward_time:.1f}}ms, Training={{samples_per_sec:.1f}}/s, Total={{total_throughput:.1f}}/s, cuda_mem={{allocated:.2f}}GB, cached={{reserved:.2f}}GB"
+                result_line = "{}_{}GPU_w{}_b{}_{}: Data={:.1f}/s, Forward={:.1f}ms, Backward={:.1f}ms, Training={:.1f}/s, Total={:.1f}/s, cuda_mem={:.2f}GB, cached={:.2f}GB".format(model_name, world_size, workers, batch_size, chk_status, data_rate, avg_forward_time, avg_backward_time, samples_per_sec, total_throughput, allocated, reserved)
                 print(result_line)
             else:
                 chk_status = "WithChk" if use_checkpointing else "NoChk"
-                result_line = f"{{model_name}}_{{world_size}}GPU_w{{workers}}_b{{batch_size}}_{{chk_status}}: Data={{data_rate:.1f}}/s, Forward={{avg_forward_time:.1f}}ms, Backward={{avg_backward_time:.1f}}ms, Training={{samples_per_sec:.1f}}/s, Total={{total_throughput:.1f}}/s"
+                result_line = "{}_{}GPU_w{}_b{}_{}: Data={:.1f}/s, Forward={:.1f}ms, Backward={:.1f}ms, Training={:.1f}/s, Total={:.1f}/s".format(model_name, world_size, workers, batch_size, chk_status, data_rate, avg_forward_time, avg_backward_time, samples_per_sec, total_throughput)
                 print(result_line)
                   
     except Exception as e:
         if rank == 0:
             chk_status = "WithChk" if use_checkpointing else "NoChk"
-            print(f"{{model_name}}_{{world_size}}GPU_w{{workers}}_b{{batch_size}}_{{chk_status}}: ERROR - {{str(e)}}")
+            print("{}_{}GPU_w{}_b{}_{}: ERROR - {}".format(model_name, world_size, workers, batch_size, chk_status, str(e)))
     
     finally:
         # Aggressive cleanup before process ends
@@ -292,8 +292,19 @@ if __name__ == "__main__":
     # Write test script to temporary file
     chk_suffix = "chk" if use_checkpointing else "nochk"
     script_path = f"temp_test_{model_name}_{gpu_count}gpu_w{workers}_b{batch_size}_{chk_suffix}.py"
+    
+    # Format the test script with actual values
+    formatted_script = test_script.format(
+        gpu_count=gpu_count,
+        model_name=model_name,
+        batch_size=batch_size,
+        workers=workers,
+        dataset_config=dataset_config,
+        use_checkpointing=use_checkpointing
+    )
+    
     with open(script_path, 'w') as f:
-        f.write(test_script)
+        f.write(formatted_script)
     
     try:
         # Run the test in a separate Python process

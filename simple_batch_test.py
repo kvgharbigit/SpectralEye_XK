@@ -83,23 +83,37 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
     device = torch.device(f"cuda:{{rank}}")
     
     try:
-        # Load appropriate config based on dataset
+        # Load appropriate config based on dataset - ensure we use the optimized configs
         with initialize(version_base=None, config_path="model_training/conf"):
             if "240" in dataset_config:
-                cfg = compose(config_name="full_run_240")
+                # Use the base config and override with 240 settings
+                cfg = compose(config_name="config")  
+                # Override with 240x240 specific settings
+                cfg.spatial_size = 240
             else:
-                cfg = compose(config_name="config")  # Default 500x500 config
+                # Use the full_run_500 config which has your optimizations
+                cfg = compose(config_name="full_run_500")
         
         # Update for this test
         cfg.model.name = model_name
-        cfg.dataset.trial_mode = False
+        cfg.dataset.trial_mode = True  # Use trial mode for faster testing
+        cfg.dataset.trial_size = 50    # Small dataset for batch testing
         cfg.hparams.batch_size = batch_size
         cfg.dataloader.num_workers = workers
         cfg.hparams.use_gradient_checkpointing = use_checkpointing
         
-        # Pass gradient checkpointing to model
-        if hasattr(cfg.model, 'model') and hasattr(cfg.model.model, 'use_gradient_checkpointing'):
-            cfg.model.model.use_gradient_checkpointing = use_checkpointing
+        # Ensure gradient checkpointing is properly configured
+        # Set in hparams (used by some configs)
+        cfg.hparams.use_gradient_checkpointing = use_checkpointing
+        
+        # Set directly in model config (more reliable)
+        if hasattr(cfg.model, 'model'):
+            # Add the parameter if it doesn't exist
+            if not hasattr(cfg.model.model, 'use_gradient_checkpointing'):
+                from omegaconf import OmegaConf
+                cfg.model.model = OmegaConf.merge(cfg.model.model, {"use_gradient_checkpointing": use_checkpointing})
+            else:
+                cfg.model.model.use_gradient_checkpointing = use_checkpointing
         
         # Override dataset if needed
         try:
@@ -132,19 +146,46 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
         )
         
         # Create model using your optimized version
+        if rank == 0:
+            print(f"    Model target: {cfg.model.model._target_}")
+            print(f"    Gradient checkpointing: {'ON' if use_checkpointing else 'OFF'}")
+            if hasattr(cfg.model.model, 'use_gradient_checkpointing'):
+                print(f"    Model checkpointing param: {cfg.model.model.use_gradient_checkpointing}")
+            
         model = instantiate(cfg.model.model).to(device)
+        
+        # Verify the model is using gradient checkpointing
+        if rank == 0:
+            if hasattr(model, 'use_gradient_checkpointing'):
+                print(f"    ✅ Model has gradient checkpointing: {model.use_gradient_checkpointing}")
+            else:
+                print(f"    ❌ Model missing gradient checkpointing attribute")
+                
         model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
         
         # Create optimizer
         optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001)
         
         # Warmup
+        if rank == 0:
+            print(f"    Starting warmup with batch_size={batch_size}")
         for i, batch in enumerate(dataloader):
             if i >= 1:
                 break
             hs_cube, label, rgb = batch
+            
+            # Verify preprocessing function
+            if rank == 0 and i == 0:
+                print(f"    Input tensor dtype: {hs_cube.dtype}, shape: {hs_cube.shape}")
+                
             hs_cube = preprocess_hsi(hs_cube)  # Using your optimized preprocessing with memory cleanup
             hs_cube = hs_cube.to(device, non_blocking=True)
+            
+            if rank == 0 and i == 0:
+                print(f"    After preprocessing dtype: {hs_cube.dtype}, shape: {hs_cube.shape}")
+                mem_before = torch.cuda.memory_allocated(device) / 1e9
+                print(f"    Memory before forward: {mem_before:.2f}GB")
+                
             output = model(hs_cube)  # Using your optimized model with attention cleanup
             if isinstance(output, tuple):
                 loss = output[0]

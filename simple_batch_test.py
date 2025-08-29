@@ -305,6 +305,8 @@ def main():
     log_both("=== BATCH SIZE OPTIMIZATION TEST ===")
     log_both(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     log_both("Testing different batch sizes with clean memory for each test")
+    log_both("NOTE: Testing WITH gradient checkpointing FIRST (should allow higher batch sizes)")
+    log_both("Using memory-optimized spectral_gpt.py with attention tensor cleanup")
     log_both("")
     
     # CSV header for structured data

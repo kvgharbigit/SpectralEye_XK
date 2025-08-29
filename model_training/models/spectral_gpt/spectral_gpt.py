@@ -61,10 +61,15 @@ class Attention(nn.Module):
         )
 
         attn = (q @ k.transpose(-2, -1)) * self.scale
+        # Free q and k tensors immediately after attention computation
+        del q, k
 
         attn = attn.softmax(dim=-1)
 
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        # Free attention weights and v tensor after computation
+        del attn, v
+        
         x = self.proj(x)
         x = self.proj_drop(x)
         x = x.view(B, -1, C)

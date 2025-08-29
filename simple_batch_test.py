@@ -357,18 +357,31 @@ def main():
                     import torch
                     import subprocess
                     import sys
+                    import gc
+                    import time
+                    
                     if torch.cuda.is_available():
                         # Check memory before cleanup
                         allocated_before = torch.cuda.memory_allocated(0) / 1e9
                         reserved_before = torch.cuda.memory_reserved(0) / 1e9
                         
-                        # Multiple aggressive cleanup attempts
-                        for i in range(3):
+                        # EXTREMELY aggressive cleanup attempts
+                        for i in range(5):  # More iterations
+                            # Force clear all GPU memory caches
                             torch.cuda.empty_cache()
                             torch.cuda.synchronize()
-                            import gc
+                            
+                            # Clear Python garbage
                             gc.collect()
-                            time.sleep(1)
+                            gc.collect()  # Run twice
+                            
+                            # Reset memory stats
+                            if hasattr(torch.cuda, 'reset_memory_stats'):
+                                torch.cuda.reset_memory_stats()
+                            if hasattr(torch.cuda, 'reset_peak_memory_stats'):
+                                torch.cuda.reset_peak_memory_stats()
+                                
+                            time.sleep(0.5)
                         
                         # Check memory after cleanup
                         allocated_after = torch.cuda.memory_allocated(0) / 1e9
@@ -377,15 +390,17 @@ def main():
                         log_both(f"    GPU Memory: Before cleanup: {allocated_before:.2f}GB allocated, {reserved_before:.2f}GB reserved")
                         log_both(f"    GPU Memory: After cleanup:  {allocated_after:.2f}GB allocated, {reserved_after:.2f}GB reserved")
                         
-                        # If memory is still allocated, try nvidia-smi reset (Windows only)
-                        if allocated_after > 0.1:  # More than 100MB still allocated
-                            try:
-                                subprocess.run(['nvidia-smi', '--gpu-reset', '-i', '0'], 
-                                             capture_output=True, timeout=10)
-                                log_both(f"    Attempted GPU reset via nvidia-smi")
-                                time.sleep(2)
-                            except:
-                                pass
+                        # If significant memory is still allocated, wait longer
+                        if allocated_after > 0.5:  # More than 500MB still allocated
+                            log_both(f"    ⚠️  High memory usage detected, adding extra cleanup delay...")
+                            time.sleep(3)
+                            
+                            # Final cleanup attempt
+                            torch.cuda.empty_cache()
+                            gc.collect()
+                            
+                            final_allocated = torch.cuda.memory_allocated(0) / 1e9
+                            log_both(f"    GPU Memory: After final cleanup: {final_allocated:.2f}GB allocated")
                     
                     # Longer delay to ensure cleanup
                     time.sleep(8)

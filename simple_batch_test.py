@@ -83,13 +83,11 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
     device = torch.device(f"cuda:{rank}")
     
     try:
-        # Load appropriate config based on dataset - ensure we use the optimized configs
+        # Load appropriate config based on dataset - use working configs
         with initialize(version_base=None, config_path="model_training/conf"):
             if "240" in dataset_config:
-                # Use the base config and override with 240 settings
-                cfg = compose(config_name="config")  
-                # Override with 240x240 specific settings
-                cfg.spatial_size = 240
+                # Use the specific 240 config that works
+                cfg = compose(config_name="full_run_240")
             else:
                 # Use the full_run_500 config which has your optimizations
                 cfg = compose(config_name="full_run_500")

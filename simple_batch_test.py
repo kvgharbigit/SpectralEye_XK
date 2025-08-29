@@ -50,6 +50,13 @@ from omegaconf import OmegaConf
 import hydra
 from hydra import initialize, compose
 
+# Import your optimized preprocessing and models
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent / "model_training"))
+from model_training.utils.preprocess_hsi import preprocess_hsi
+from model_training.models.spectral_gpt.models_mae_spectral import MaskedAutoencoderViT
+
 def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_config, use_checkpointing):
     # Setup DDP
     from torch.distributed import TCPStore
@@ -118,27 +125,21 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
             drop_last=True
         )
         
-        # Create model
+        # Create model using your optimized version
         model = instantiate(cfg.model.model).to(device)
         model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
         
         # Create optimizer
         optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001)
         
-        # Preprocessor
-        def preprocess_hsi(x):
-            x = torch.log1p(x)
-            x = (x - x.mean(dim=(2,3), keepdim=True)) / (x.std(dim=(2,3), keepdim=True) + 1e-8)
-            return x
-        
         # Warmup
         for i, batch in enumerate(dataloader):
             if i >= 1:
                 break
             hs_cube, label, rgb = batch
-            hs_cube = preprocess_hsi(hs_cube)
+            hs_cube = preprocess_hsi(hs_cube)  # Using your optimized preprocessing with memory cleanup
             hs_cube = hs_cube.to(device, non_blocking=True)
-            output = model(hs_cube)
+            output = model(hs_cube)  # Using your optimized model with attention cleanup
             if isinstance(output, tuple):
                 loss = output[0]
             else:
@@ -160,14 +161,14 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
             # Data loading time
             data_start = time.perf_counter()
             hs_cube, label, rgb = batch
-            hs_cube = preprocess_hsi(hs_cube)
+            hs_cube = preprocess_hsi(hs_cube)  # Using your optimized preprocessing with memory cleanup
             hs_cube = hs_cube.to(device, non_blocking=True)
             torch.cuda.synchronize()
             data_times.append(time.perf_counter() - data_start)
             
             # Forward
             forward_start = time.perf_counter()
-            output = model(hs_cube)
+            output = model(hs_cube)  # Using your optimized model with attention cleanup
             if isinstance(output, tuple):
                 loss = output[0]
             else:
@@ -192,9 +193,18 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
             samples_per_sec = batch_size / (avg_forward_time/1000 + avg_backward_time/1000)
             total_throughput = samples_per_sec * world_size
             
-            chk_status = "WithChk" if use_checkpointing else "NoChk"
-            result_line = f"{{model_name}}_{{world_size}}GPU_w{{workers}}_b{{batch_size}}_{{chk_status}}: Data={{data_rate:.1f}}/s, Forward={{avg_forward_time:.1f}}ms, Backward={{avg_backward_time:.1f}}ms, Training={{samples_per_sec:.1f}}/s, Total={{total_throughput:.1f}}/s"
-            print(result_line)
+            # Get memory usage (like in your training logs)
+            if torch.cuda.is_available():
+                allocated = torch.cuda.memory_allocated(device) / 1024**3
+                reserved = torch.cuda.memory_reserved(device) / 1024**3
+                
+                chk_status = "WithChk" if use_checkpointing else "NoChk"
+                result_line = f"{{model_name}}_{{world_size}}GPU_w{{workers}}_b{{batch_size}}_{{chk_status}}: Data={{data_rate:.1f}}/s, Forward={{avg_forward_time:.1f}}ms, Backward={{avg_backward_time:.1f}}ms, Training={{samples_per_sec:.1f}}/s, Total={{total_throughput:.1f}}/s, cuda_mem={{allocated:.2f}}GB, cached={{reserved:.2f}}GB"
+                print(result_line)
+            else:
+                chk_status = "WithChk" if use_checkpointing else "NoChk"
+                result_line = f"{{model_name}}_{{world_size}}GPU_w{{workers}}_b{{batch_size}}_{{chk_status}}: Data={{data_rate:.1f}}/s, Forward={{avg_forward_time:.1f}}ms, Backward={{avg_backward_time:.1f}}ms, Training={{samples_per_sec:.1f}}/s, Total={{total_throughput:.1f}}/s"
+                print(result_line)
                   
     except Exception as e:
         if rank == 0:

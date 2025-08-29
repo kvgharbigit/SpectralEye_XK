@@ -157,9 +157,9 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
         # Verify the model is using gradient checkpointing
         if rank == 0:
             if hasattr(model, 'use_gradient_checkpointing'):
-                print(f"    ✅ Model has gradient checkpointing: {model.use_gradient_checkpointing}")
+                print(f"    [OK] Model has gradient checkpointing: {model.use_gradient_checkpointing}")
             else:
-                print(f"    ❌ Model missing gradient checkpointing attribute")
+                print(f"    [ERROR] Model missing gradient checkpointing attribute")
                 
         model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
         
@@ -301,7 +301,7 @@ if __name__ == "__main__":
     formatted_script = formatted_script.replace('"{dataset_config}"', f'"{dataset_config}"')
     formatted_script = formatted_script.replace("{use_checkpointing}", str(use_checkpointing))
     
-    with open(script_path, 'w') as f:
+    with open(script_path, 'w', encoding='utf-8') as f:
         f.write(formatted_script)
     
     try:

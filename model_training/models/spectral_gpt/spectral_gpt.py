@@ -598,6 +598,7 @@ class MaskedAutoencoderViT(nn.Module):
             use_gradient_checkpointing=False,
     ):
         super().__init__()
+        self.use_gradient_checkpointing = use_gradient_checkpointing
         self.encoder = EncoderVit(
             img_size,
             num_channels,

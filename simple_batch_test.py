@@ -14,11 +14,12 @@ from pathlib import Path
 
 # Test configurations: (model, workers, batch_sizes, dataset_config)
 # Updated with higher batch sizes since memory optimizations are now applied
+# PRIORITIZING 500x500 models first as requested
 test_configs = [
+    ("mae_small", 1, [1, 2, 4, 6, 8, 10], "combined_dataset"),         # Test higher for 500x500 - FIRST
+    ("mae_medium", 1, [1, 2, 4, 6, 8], "combined_dataset"),            # Your current model - should handle batch_size=6+ - SECOND
     ("mae_small_240", 1, [1, 2, 4, 6, 8, 12, 16], "dataset_240"),      # More optimistic for 240x240
     ("mae_medium_240", 1, [1, 2, 4, 6, 8, 12], "dataset_240"),         # Should handle higher batch sizes now
-    ("mae_small", 1, [1, 2, 4, 6, 8, 10], "combined_dataset"),         # Test higher for 500x500
-    ("mae_medium", 1, [1, 2, 4, 6, 8], "combined_dataset"),            # Your current model - should handle batch_size=6+
 ]
 
 # Gradient checkpointing variants to test - prioritize WithChk since spectral_gpt.py supports it
@@ -469,7 +470,8 @@ def main():
                     log_both(f"    {batch_size}: {result if result else 'No output'}")
                     
                     # Parse result and save to CSV
-                    if result and "ERROR" not in result and "TIMEOUT" not in result:
+                    # Check if the result contains actual performance data (successful run)
+                    if result and "Data=" in result and "Forward=" in result and "Training=" in result:
                         try:
                             # Simple parsing - look for numbers after = signs
                             data_rate = 0
@@ -534,14 +536,21 @@ def main():
                                        f"0,0,0,0,0,N/A,0,PARSE_ERROR\n")
                                 f.flush()
                     else:
-                        # Mark failed tests
-                        status = "ERROR" if result and "ERROR" in result else "TIMEOUT"
-                        
-                        # Check if it's a memory error
-                        if result and "CUDA out of memory" in result:
+                        # Mark failed tests - check for actual error patterns that indicate failure
+                        if result is None or not result.strip():
+                            status = "NO_OUTPUT"
+                        elif "TIMEOUT" in result:
+                            status = "TIMEOUT"
+                        elif "CUDA out of memory" in result or "OutOfMemoryError" in result:
                             status = "OOM"
                             hit_memory_limit = True
                             log_both(f"  Memory limit reached at batch {batch_size}")
+                        elif result.endswith("ERROR"):  # Check if line actually ends with ERROR (not just contains ERROR in debug output)
+                            status = "ERROR"
+                        elif "Exception" in result or "Error" in result and "Data=" not in result:
+                            status = "ERROR"
+                        else:
+                            status = "UNKNOWN"
                         
                         with open(csv_file, 'a') as f:
                             f.write(f"{model_name},{resolution},{gpu_count},{workers},{batch_size},{chk_desc},"

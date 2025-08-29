@@ -97,6 +97,14 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
         cfg.dataloader.num_workers = workers
         cfg.hparams.use_gradient_checkpointing = use_checkpointing
         
+        # Debug: Print gradient checkpointing status
+        if rank == 0:
+            print(f"    Gradient checkpointing: {'ON' if use_checkpointing else 'OFF'}")
+            
+        # Pass gradient checkpointing to model
+        if hasattr(cfg.model, 'model') and hasattr(cfg.model.model, 'use_gradient_checkpointing'):
+            cfg.model.model.use_gradient_checkpointing = use_checkpointing
+        
         # Override dataset if needed
         try:
             current_dataset = cfg.defaults.dataset[0] if hasattr(cfg, 'defaults') and hasattr(cfg.defaults, 'dataset') else None

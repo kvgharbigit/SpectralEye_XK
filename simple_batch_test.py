@@ -80,7 +80,7 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
     )
     
     torch.cuda.set_device(rank)
-    device = torch.device(f"cuda:{{rank}}")
+    device = torch.device(f"cuda:{rank}")
     
     try:
         # Load appropriate config based on dataset - ensure we use the optimized configs

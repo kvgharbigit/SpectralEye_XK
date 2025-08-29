@@ -106,14 +106,15 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
         # Set in hparams (used by some configs)
         cfg.hparams.use_gradient_checkpointing = use_checkpointing
         
-        # Set directly in model config (more reliable)
+        # Add gradient checkpointing parameter to model config
         if hasattr(cfg.model, 'model'):
-            # Add the parameter if it doesn't exist
-            if not hasattr(cfg.model.model, 'use_gradient_checkpointing'):
-                from omegaconf import OmegaConf
-                cfg.model.model = OmegaConf.merge(cfg.model.model, {"use_gradient_checkpointing": use_checkpointing})
-            else:
-                cfg.model.model.use_gradient_checkpointing = use_checkpointing
+            from omegaconf import OmegaConf
+            # Set struct to False to allow adding new keys
+            OmegaConf.set_struct(cfg, False)
+            # Add the gradient checkpointing parameter
+            cfg.model.model.use_gradient_checkpointing = use_checkpointing
+            # Re-enable struct mode
+            OmegaConf.set_struct(cfg, True)
         
         # Override dataset if needed
         try:

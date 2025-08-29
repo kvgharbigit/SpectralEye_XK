@@ -140,12 +140,15 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
         
         # Debug: Print which model file is being used
         if rank == 0:
-            model_module = model.__class__.__module__
-            print(f"    Model loaded from: {model_module}")
-            if "spectral_gpt" in model_module:
-                print(f"    ✅ Using optimized spectral_gpt.py with attention cleanup")
-            else:
-                print(f"    ⚠️  Using different model file: {model_module}")
+            try:
+                model_module = model.__class__.__module__
+                print(f"    Model loaded from: {model_module}")
+                if "spectral_gpt" in model_module:
+                    print(f"    ✅ Using optimized spectral_gpt.py with attention cleanup")
+                else:
+                    print(f"    ⚠️  Using different model file: {model_module}")
+            except Exception as e:
+                print(f"    Debug info error: {e}")
                 
         model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
         

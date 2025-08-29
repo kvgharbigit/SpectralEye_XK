@@ -80,7 +80,7 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
     )
     
     torch.cuda.set_device(rank)
-    device = torch.device(f"cuda:{{rank}}")
+    device = torch.device(f"cuda:{rank}")
     
     try:
         # Load appropriate config based on dataset - ensure we use the optimized configs
@@ -293,15 +293,13 @@ if __name__ == "__main__":
     chk_suffix = "chk" if use_checkpointing else "nochk"
     script_path = f"temp_test_{model_name}_{gpu_count}gpu_w{workers}_b{batch_size}_{chk_suffix}.py"
     
-    # Format the test script with actual values
-    formatted_script = test_script.format(
-        gpu_count=gpu_count,
-        model_name=model_name,
-        batch_size=batch_size,
-        workers=workers,
-        dataset_config=dataset_config,
-        use_checkpointing=use_checkpointing
-    )
+    # Replace specific placeholders in the test script
+    formatted_script = test_script.replace("{gpu_count}", str(gpu_count))
+    formatted_script = formatted_script.replace('"{model_name}"', f'"{model_name}"')
+    formatted_script = formatted_script.replace("{batch_size}", str(batch_size))
+    formatted_script = formatted_script.replace("{workers}", str(workers))
+    formatted_script = formatted_script.replace('"{dataset_config}"', f'"{dataset_config}"')
+    formatted_script = formatted_script.replace("{use_checkpointing}", str(use_checkpointing))
     
     with open(script_path, 'w') as f:
         f.write(formatted_script)

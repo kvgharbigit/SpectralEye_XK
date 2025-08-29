@@ -97,10 +97,6 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
         cfg.dataloader.num_workers = workers
         cfg.hparams.use_gradient_checkpointing = use_checkpointing
         
-        # Debug: Print gradient checkpointing status
-        if rank == 0:
-            print(f"    Gradient checkpointing: {'ON' if use_checkpointing else 'OFF'}")
-            
         # Pass gradient checkpointing to model
         if hasattr(cfg.model, 'model') and hasattr(cfg.model.model, 'use_gradient_checkpointing'):
             cfg.model.model.use_gradient_checkpointing = use_checkpointing
@@ -137,19 +133,6 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
         
         # Create model using your optimized version
         model = instantiate(cfg.model.model).to(device)
-        
-        # Debug: Print which model file is being used
-        if rank == 0:
-            try:
-                model_module = model.__class__.__module__
-                print(f"    Model loaded from: {model_module}")
-                if "spectral_gpt" in model_module:
-                    print(f"    ✅ Using optimized spectral_gpt.py with attention cleanup")
-                else:
-                    print(f"    ⚠️  Using different model file: {model_module}")
-            except Exception as e:
-                print(f"    Debug info error: {e}")
-                
         model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
         
         # Create optimizer

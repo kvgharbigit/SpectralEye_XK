@@ -13,17 +13,18 @@ import sys
 from pathlib import Path
 
 # Test configurations: (model, workers, batch_sizes, dataset_config)
+# Updated with higher batch sizes since memory optimizations are now applied
 test_configs = [
-    ("mae_small_240", 1, [1, 2, 4, 6, 8, 12], "dataset_240"),
-    ("mae_medium_240", 1, [1, 2, 4, 6], "dataset_240"),
-    ("mae_small", 1, [1, 2, 4, 6, 8], "combined_dataset"), 
-    ("mae_medium", 1, [1, 2, 4], "combined_dataset"),
+    ("mae_small_240", 1, [1, 2, 4, 6, 8, 12, 16], "dataset_240"),      # More optimistic for 240x240
+    ("mae_medium_240", 1, [1, 2, 4, 6, 8, 12], "dataset_240"),         # Should handle higher batch sizes now
+    ("mae_small", 1, [1, 2, 4, 6, 8, 10], "combined_dataset"),         # Test higher for 500x500
+    ("mae_medium", 1, [1, 2, 4, 6, 8], "combined_dataset"),            # Your current model - should handle batch_size=6+
 ]
 
-# Gradient checkpointing variants to test
+# Gradient checkpointing variants to test - prioritize WithChk since spectral_gpt.py supports it
 checkpoint_configs = [
-    (False, "NoChk"),
-    (True, "WithChk")
+    (True, "WithChk"),   # Test gradient checkpointing FIRST (should use less memory)
+    (False, "NoChk")     # Then test without checkpointing
 ]
 
 def run_single_test(model_name, workers, batch_size, gpu_count, dataset_config, use_checkpointing=False):

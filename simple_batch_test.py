@@ -436,7 +436,7 @@ def main():
                         
                         # If significant memory is still allocated, wait longer
                         if allocated_after > 0.5:  # More than 500MB still allocated
-                            log_both(f"    ⚠️  High memory usage detected, adding extra cleanup delay...")
+                            log_both(f"    [WARNING] High memory usage detected, adding extra cleanup delay...")
                             time.sleep(3)
                             
                             # Final cleanup attempt

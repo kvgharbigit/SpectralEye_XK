@@ -109,8 +109,11 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
             from omegaconf import OmegaConf
             # Set struct to False to allow adding new keys
             OmegaConf.set_struct(cfg, False)
-            # Add the gradient checkpointing parameter
-            cfg.model.model.use_gradient_checkpointing = use_checkpointing
+            # Add the gradient checkpointing parameter - use proper key
+            if not hasattr(cfg.model.model, 'use_gradient_checkpointing'):
+                cfg.model.model.use_gradient_checkpointing = use_checkpointing
+            else:
+                cfg.model.model.use_gradient_checkpointing = use_checkpointing
             # Re-enable struct mode
             OmegaConf.set_struct(cfg, True)
         
@@ -182,6 +185,20 @@ def single_gpu_test(rank, world_size, model_name, batch_size, workers, dataset_c
             
             if rank == 0 and i == 0:
                 print(f"    After preprocessing dtype: {hs_cube.dtype}, shape: {hs_cube.shape}")
+                
+                # Validate input dimensions match model expectations
+                expected_spatial = cfg.model.model.img_size if hasattr(cfg.model.model, 'img_size') else 240
+                expected_channels = cfg.model.model.num_wavelengths if hasattr(cfg.model.model, 'num_wavelengths') else 30
+                actual_shape = hs_cube.shape
+                
+                print(f"    Expected spatial: {expected_spatial}x{expected_spatial}, channels: {expected_channels}")
+                print(f"    Actual: {actual_shape[2]}x{actual_shape[3]}, channels: {actual_shape[1]}")
+                
+                if actual_shape[2] != expected_spatial or actual_shape[3] != expected_spatial:
+                    raise ValueError(f"Spatial dimension mismatch: expected {expected_spatial}x{expected_spatial}, got {actual_shape[2]}x{actual_shape[3]}")
+                if actual_shape[1] != expected_channels:
+                    raise ValueError(f"Channel dimension mismatch: expected {expected_channels}, got {actual_shape[1]}")
+                
                 mem_before = torch.cuda.memory_allocated(device) / 1e9
                 print(f"    Memory before forward: {mem_before:.2f}GB")
                 

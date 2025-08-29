@@ -31,7 +31,7 @@ def run_single_test(model_name, workers, batch_size, gpu_count, dataset_config, 
     """Run a single configuration test in a separate process"""
     
     # Create a simple test script
-    test_script = f"""
+    test_script = """
 import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 os.environ['OMP_NUM_THREADS'] = '1'
